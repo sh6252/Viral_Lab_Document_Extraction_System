@@ -1,0 +1,56 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*secret*
+*credentials*
+
+# Python caches and local tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node and frontend build artifacts
+node_modules/
+dist/
+build/
+.vite/
+
+# Local uploads, sensitive documents, and generated storage
+uploads/
+storage/
+data/uploads/
+data/raw/
+data/private/
+data/patient_data/
+sample_documents/
+medical_documents/
+patient_documents/
+
+# Generated exports and evaluation artifacts
+exports/
+generated_exports/
+evaluation/artifacts/
+evaluation/reports/
+evaluation/results/
+*.xlsx
+*.xls
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
