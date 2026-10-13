@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://virology-lab-idp.local/schemas/extraction_result.schema.json",
+  "title": "Virology Lab IDP Common Extraction Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "extraction_id", "provider", "logical_forms"],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "extraction_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mode"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "mode": { "enum": ["local_ocr", "vision_ai", "hybrid", "mock"] },
+        "version": { "type": "string" }
+      }
+    },
+    "logical_forms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/logical_form_result" }
+    }
+  },
+  "$defs": {
+    "logical_form_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["form_id", "fields"],
+      "properties": {
+        "form_id": { "type": "string", "minLength": 1 },
+        "fields": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "first_name": { "$ref": "#/$defs/field_result" },
+            "last_name": { "$ref": "#/$defs/field_result" },
+            "israeli_id": { "$ref": "#/$defs/field_result" },
+            "central_numbers": { "$ref": "#/$defs/field_result" },
+            "sample_receipt_date": { "$ref": "#/$defs/field_result" },
+            "sender": { "$ref": "#/$defs/field_result" },
+            "commitment_numbers": { "$ref": "#/$defs/field_result" }
+          }
+        }
+      }
+    },
+    "field_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value_status", "values"],
+      "properties": {
+        "value_status": {
+          "enum": ["present", "missing", "unreadable", "ambiguous", "not_processed"],
+          "description": "Use missing for extraction output when the system did not extract a value. Ground-truth absence is represented separately as absent."
+        },
+        "values": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/field_value" }
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "review_status": {
+          "enum": [
+            "unreviewed",
+            "needs_review",
+            "approved_as_extracted",
+            "corrected",
+            "approved_corrected",
+            "rejected",
+            "acknowledged_blank",
+            "needs_clarification"
+          ],
+          "description": "Optional review/export signal used by evaluation to count silently accepted errors only when available."
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "field_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw"],
+      "properties": {
+        "raw": {
+          "type": "string",
+          "description": "Untouched extracted string. Do not coerce identifiers to numbers."
+        },
+        "normalized": {
+          "type": "string",
+          "description": "Optional deterministic normalized value. Must remain a string."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["page_index", "source_kind"],
+      "properties": {
+        "page_index": { "type": "integer", "minimum": 0 },
+        "source_kind": {
+          "enum": ["ocr_text", "vision_model", "barcode", "sticker", "stamp", "handwriting", "manual_review"]
+        },
+        "bounding_box": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "width": { "type": "number" },
+            "height": { "type": "number" }
+          }
+        },
+        "text_snippet": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
