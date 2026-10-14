@@ -31,7 +31,47 @@ Do not commit `.venv/`, `.env`, uploaded documents, generated exports, or real m
 
 ```powershell
 python -m unittest discover -v
-python -m pytest -v
+python -m pytest -q
+python -m pip check
+```
+
+### Run the Backend
+
+The current backend foundation exposes a FastAPI application without database, OCR, AI, upload, or export integrations.
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m uvicorn backend.main:app --reload
+```
+
+Health check:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "healthy",
+  "service": "Virology Lab IDP",
+  "version": "0.1.0",
+  "external_ai_enabled": false
+}
+```
+
+### Environment Configuration
+
+Copy `.env.example` to `.env` for local development if you need environment overrides.
+
+External AI is disabled by default:
+
+```powershell
+AI_OUTBOUND_ENABLED=false
+ALLOW_EXTERNAL_PHI=false
+APPROVED_AI_PROVIDERS=
+DEFAULT_EXTRACTION_ADAPTER=local_ocr
 ```
 
 ### Troubleshooting
@@ -47,3 +87,5 @@ If `pip install -e ".[dev]"` fails because of Python compatibility, install a su
 If dependency installation fails because of network access, retry from an environment with package-index access.
 
 If `pytest` is not found, activate `.venv` and rerun `python -m pip install -e ".[dev]"`.
+
+If `uvicorn` is not found, activate `.venv` and rerun `python -m pip install -e ".[dev]"`.
