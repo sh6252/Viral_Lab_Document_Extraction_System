@@ -30,6 +30,8 @@ class AppConfig:
     allow_external_phi: bool = False
     approved_ai_providers: tuple[str, ...] = ()
     default_extraction_adapter: str = "local_ocr"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -38,9 +40,15 @@ class AppConfig:
             allow_external_phi=_env_bool("ALLOW_EXTERNAL_PHI", default=False),
             approved_ai_providers=_env_csv("APPROVED_AI_PROVIDERS"),
             default_extraction_adapter=os.getenv("DEFAULT_EXTRACTION_ADAPTER", "local_ocr"),
+            gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         )
 
     def external_ai_allowed(self, provider_name: str) -> bool:
-        """Fail closed unless outbound AI and the named provider are approved."""
+        """Fail closed unless outbound AI, PHI transfer, and provider approval are explicit."""
 
-        return self.ai_outbound_enabled and provider_name in self.approved_ai_providers
+        return (
+            self.ai_outbound_enabled
+            and self.allow_external_phi
+            and provider_name in self.approved_ai_providers
+        )

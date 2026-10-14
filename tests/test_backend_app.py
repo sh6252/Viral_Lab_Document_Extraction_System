@@ -36,13 +36,15 @@ class BackendAppTests(unittest.TestCase):
         self.assertFalse(config.ai_outbound_enabled)
         self.assertFalse(config.allow_external_phi)
         self.assertEqual(config.approved_ai_providers, ())
+        self.assertIsNone(config.gemini_api_key)
         self.assertFalse(config.external_ai_allowed("future-provider"))
 
-    def test_external_ai_requires_explicit_provider_approval(self):
+    def test_external_ai_requires_explicit_phi_and_provider_approval(self):
         with patch.dict(
             "os.environ",
             {
                 "AI_OUTBOUND_ENABLED": "true",
+                "ALLOW_EXTERNAL_PHI": "true",
                 "APPROVED_AI_PROVIDERS": "approved-provider",
             },
             clear=True,
@@ -51,6 +53,13 @@ class BackendAppTests(unittest.TestCase):
 
         self.assertTrue(config.external_ai_allowed("approved-provider"))
         self.assertFalse(config.external_ai_allowed("unknown-provider"))
+
+    def test_external_ai_key_alone_does_not_authorize_provider(self):
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "placeholder"}, clear=True):
+            config = AppConfig.from_env()
+
+        self.assertEqual(config.gemini_api_key, "placeholder")
+        self.assertFalse(config.external_ai_allowed("gemini"))
 
 
 if __name__ == "__main__":

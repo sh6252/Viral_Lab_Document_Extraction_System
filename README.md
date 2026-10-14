@@ -4,7 +4,7 @@ Central Virology Laboratory document extraction system.
 
 ## Python Development Setup
 
-The project currently contains the evaluation foundation for the document extraction system. Backend, database, frontend, OCR, AI adapters, and Excel export are not implemented yet.
+The project currently contains the evaluation foundation, FastAPI backend foundation, domain contracts, and a policy-gated Gemini extraction adapter. Database, frontend, OCR, upload processing, real provider orchestration, and Excel export are not implemented yet.
 
 ### Requirements
 
@@ -72,7 +72,11 @@ AI_OUTBOUND_ENABLED=false
 ALLOW_EXTERNAL_PHI=false
 APPROVED_AI_PROVIDERS=
 DEFAULT_EXTRACTION_ADAPTER=local_ocr
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
 ```
+
+Gemini extraction remains disabled unless `AI_OUTBOUND_ENABLED=true`, `ALLOW_EXTERNAL_PHI=true`, `APPROVED_AI_PROVIDERS` includes `gemini`, the request-level provider policy permits `external_phi`, and `GEMINI_API_KEY` is set. Unit tests use a fake Gemini client and do not make real external AI calls.
 
 ### Troubleshooting
 
