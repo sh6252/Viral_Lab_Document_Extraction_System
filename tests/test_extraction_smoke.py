@@ -7,6 +7,7 @@ from unittest.mock import patch
 from jsonschema import Draft202012Validator
 
 from backend.services.extraction import DocumentInput
+from backend.services.extraction.errors import ProviderConnectionError
 from backend.services.extraction.schema_validation import validate_extraction_result_schema
 from backend.tools.extraction_smoke import (
     OfflineSmokeExtractionAdapter,
@@ -176,6 +177,43 @@ class ExtractionSmokeTests(unittest.TestCase):
         self.assertNotIn("VERY_SECRET_TEST_KEY", serialized)
         self.assertNotIn("%PDF-1.4", serialized)
         self.assertIn("PROVIDER_NOT_AUTHORIZED", serialized)
+
+    def test_live_failure_report_includes_only_safe_diagnostics(self):
+        class _FailingAdapter:
+            def extract(self, request, document):
+                raise ProviderConnectionError(
+                    "AI provider connection failed.",
+                    diagnostics={
+                        "exception_class": "ConnectError",
+                        "exception_module": "httpx",
+                    },
+                )
+
+        with patch(
+            "backend.tools.extraction_smoke.GeminiExtractionAdapter",
+            return_value=_FailingAdapter(),
+        ), patch.dict("os.environ", {"GEMINI_API_KEY": "VERY_SECRET_TEST_KEY"}, clear=False):
+            report = run_smoke_test(
+                SmokeRunOptions(
+                    live_gemini=True,
+                    authorize_external_processing=True,
+                    redact=True,
+                )
+            )
+
+        self.assertEqual(report["extraction_status"], "failed")
+        self.assertEqual(report["errors"][0]["code"], "PROVIDER_CONNECTION_ERROR")
+        self.assertEqual(
+            report["errors"][0]["diagnostics"],
+            {
+                "exception_class": "ConnectError",
+                "exception_module": "httpx",
+            },
+        )
+        serialized = json.dumps(report, ensure_ascii=False)
+        self.assertNotIn("VERY_SECRET_TEST_KEY", serialized)
+        self.assertNotIn("%PDF-1.4", serialized)
+        self.assertIn("[REDACTED]", serialized)
 
 
 if __name__ == "__main__":

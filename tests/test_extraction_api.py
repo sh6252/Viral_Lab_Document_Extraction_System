@@ -17,6 +17,7 @@ from backend.services.extraction import GeminiExtractionAdapter
 from backend.services.extraction.base import DocumentInput
 from backend.services.extraction.errors import (
     InvalidProviderResponse,
+    ProviderConnectionError,
     ProviderRateLimit,
     ProviderTimeout,
 )
@@ -277,6 +278,32 @@ class ExtractionApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["error"]["code"], "INVALID_PROVIDER_RESPONSE")
+
+    def test_http_error_response_does_not_expose_provider_diagnostics(self):
+        adapter = FakeExtractionAdapter(
+            error=ProviderConnectionError(
+                "AI provider connection failed.",
+                diagnostics={
+                    "exception_class": "ConnectError",
+                    "exception_module": "httpx",
+                    "http_status_code": 503,
+                    "provider_status": "UNAVAILABLE",
+                },
+            )
+        )
+        response = _post(_client(adapter), PDF_BYTES, "application/pdf")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": {
+                    "code": "PROVIDER_CONNECTION_ERROR",
+                    "message": "AI provider connection failed.",
+                    "retryable": True,
+                }
+            },
+        )
 
     def test_success_response_validates_against_canonical_schema(self):
         response = _post(_client(FakeExtractionAdapter()), PDF_BYTES, "application/pdf")

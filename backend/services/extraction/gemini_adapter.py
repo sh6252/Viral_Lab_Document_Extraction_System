@@ -17,7 +17,11 @@ from backend.services.extraction.errors import (
     DocumentTooLarge,
     ExtractionAdapterError,
     InvalidProviderResponse,
+    InvalidProviderRequest,
+    ProviderConnectionError,
+    ProviderNotAuthorized,
     ProviderRateLimit,
+    ProviderResourceUnavailable,
     ProviderTimeout,
     ProviderUnavailable,
     UnsupportedDocumentType,
@@ -199,19 +203,49 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         return ExtractionFields(**sanitized)
 
     def _classify_provider_error(self, exc: Exception) -> ExtractionAdapterError:
-        status_code = (
-            getattr(exc, "status_code", None)
-            or getattr(getattr(exc, "response", None), "status_code", None)
-            or getattr(exc, "code", None)
-        )
+        diagnostics = _safe_provider_diagnostics(exc)
+        status_code = diagnostics.get("http_status_code")
         name = type(exc).__name__.lower()
         if isinstance(exc, TimeoutError) or "timeout" in name:
-            return ProviderTimeout("AI provider request timed out.")
+            return ProviderTimeout(
+                "AI provider request timed out.",
+                diagnostics=diagnostics,
+            )
+        if status_code == 400:
+            return InvalidProviderRequest(
+                "AI provider rejected the extraction request.",
+                diagnostics=diagnostics,
+            )
+        if status_code in {401, 403}:
+            return ProviderNotAuthorized(
+                "AI provider authentication or permission check failed.",
+                diagnostics=diagnostics,
+            )
+        if status_code == 404:
+            return ProviderResourceUnavailable(
+                "AI provider resource or model is unavailable.",
+                diagnostics=diagnostics,
+            )
         if status_code == 429 or "ratelimit" in name or "rate_limit" in name:
-            return ProviderRateLimit("AI provider rate limit was reached.")
+            return ProviderRateLimit(
+                "AI provider rate limit or quota was reached.",
+                diagnostics=diagnostics,
+            )
         if status_code in {500, 502, 503, 504} or "unavailable" in name:
-            return ProviderUnavailable("AI provider is temporarily unavailable.")
-        return ProviderUnavailable("AI provider request failed.")
+            return ProviderUnavailable(
+                "AI provider is temporarily unavailable.",
+                diagnostics=diagnostics,
+            )
+        if _is_transport_error(exc):
+            return ProviderConnectionError(
+                "AI provider connection failed.",
+                diagnostics=diagnostics,
+            )
+        return ProviderUnavailable(
+            "AI provider request failed.",
+            retryable=False,
+            diagnostics=diagnostics,
+        )
 
     @staticmethod
     def _create_google_client(api_key: str, timeout_seconds: int) -> Any:
@@ -225,3 +259,50 @@ class GeminiExtractionAdapter(ExtractionAdapter):
             api_key=api_key,
             http_options=types.HttpOptions(timeout=timeout_seconds * 1000),
         )
+
+
+def _safe_provider_diagnostics(exc: Exception) -> dict[str, str | int]:
+    diagnostics: dict[str, str | int] = {
+        "exception_class": type(exc).__name__,
+        "exception_module": type(exc).__module__,
+    }
+    status_code = _extract_status_code(exc)
+    if status_code is not None:
+        diagnostics["http_status_code"] = status_code
+    provider_status = getattr(exc, "status", None)
+    if isinstance(provider_status, str) and provider_status:
+        diagnostics["provider_status"] = provider_status
+    return diagnostics
+
+
+def _extract_status_code(exc: Exception) -> int | None:
+    for candidate in (
+        getattr(exc, "status_code", None),
+        getattr(getattr(exc, "response", None), "status_code", None),
+        getattr(exc, "code", None),
+    ):
+        if isinstance(candidate, int):
+            return candidate
+        if isinstance(candidate, str) and candidate.isdecimal():
+            return int(candidate)
+    return None
+
+
+def _is_transport_error(exc: Exception) -> bool:
+    if isinstance(exc, ConnectionError):
+        return True
+    name = type(exc).__name__.lower()
+    module = type(exc).__module__.lower()
+    transport_markers = (
+        "connect",
+        "connection",
+        "network",
+        "transport",
+        "socket",
+        "ssl",
+        "tls",
+        "proxy",
+        "dns",
+        "nameresolution",
+    )
+    return any(marker in name or marker in module for marker in transport_markers)

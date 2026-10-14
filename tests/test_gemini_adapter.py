@@ -13,9 +13,12 @@ from backend.services.extraction import DocumentInput, GeminiExtractionAdapter
 from backend.services.extraction.errors import (
     DocumentTooLarge,
     InvalidProviderResponse,
+    InvalidProviderRequest,
     MissingProviderCredentials,
+    ProviderConnectionError,
     ProviderNotAuthorized,
     ProviderRateLimit,
+    ProviderResourceUnavailable,
     ProviderTimeout,
     ProviderUnavailable,
     UnsupportedDocumentType,
@@ -49,9 +52,14 @@ class _FakeClient:
 
 
 class _StatusError(Exception):
-    def __init__(self, status_code):
-        super().__init__("provider error")
+    def __init__(self, status_code, *, status=None):
+        super().__init__("provider error with SECRET_TEST_KEY and raw payload")
         self.status_code = status_code
+        self.status = status
+
+
+class _NetworkSdkError(Exception):
+    pass
 
 
 class _TimeoutSdkError(Exception):
@@ -326,27 +334,178 @@ class GeminiExtractionAdapterTests(unittest.TestCase):
         with self.assertRaises(ProviderTimeout):
             adapter.extract(_request(), _document())
 
+    def test_provider_invalid_request_is_classified_without_retry(self):
+        fake_client = _FakeClient(_StatusError(400, status="INVALID_ARGUMENT"))
+        adapter = GeminiExtractionAdapter(
+            config=_authorized_config(),
+            client_factory=lambda api_key, timeout: fake_client,
+            max_retries=2,
+        )
+
+        with self.assertRaises(InvalidProviderRequest) as context:
+            adapter.extract(_request(), _document())
+
+        self.assertEqual(len(fake_client.calls), 1)
+        self.assertFalse(context.exception.retryable)
+        self.assertEqual(context.exception.code, "INVALID_PROVIDER_REQUEST")
+        self.assertEqual(
+            context.exception.safe_diagnostics(),
+            {
+                "exception_class": "_StatusError",
+                "exception_module": _StatusError.__module__,
+                "http_status_code": 400,
+                "provider_status": "INVALID_ARGUMENT",
+            },
+        )
+        self.assertNotIn("SECRET_TEST_KEY", str(context.exception))
+
+    def test_provider_authentication_error_is_classified_without_retry(self):
+        for status_code in (401, 403):
+            with self.subTest(status_code=status_code):
+                fake_client = _FakeClient(_StatusError(status_code, status="PERMISSION_DENIED"))
+                adapter = GeminiExtractionAdapter(
+                    config=_authorized_config(),
+                    client_factory=lambda api_key, timeout: fake_client,
+                    max_retries=2,
+                )
+
+                with self.assertRaises(ProviderNotAuthorized) as context:
+                    adapter.extract(_request(), _document())
+
+                self.assertEqual(len(fake_client.calls), 1)
+                self.assertFalse(context.exception.retryable)
+                self.assertEqual(context.exception.code, "PROVIDER_NOT_AUTHORIZED")
+                self.assertEqual(
+                    context.exception.safe_diagnostics()["http_status_code"],
+                    status_code,
+                )
+                self.assertEqual(
+                    context.exception.safe_diagnostics()["provider_status"],
+                    "PERMISSION_DENIED",
+                )
+
+    def test_provider_resource_unavailable_is_classified_without_retry(self):
+        fake_client = _FakeClient(_StatusError(404, status="NOT_FOUND"))
+        adapter = GeminiExtractionAdapter(
+            config=_authorized_config(),
+            client_factory=lambda api_key, timeout: fake_client,
+            max_retries=2,
+        )
+
+        with self.assertRaises(ProviderResourceUnavailable) as context:
+            adapter.extract(_request(), _document())
+
+        self.assertEqual(len(fake_client.calls), 1)
+        self.assertFalse(context.exception.retryable)
+        self.assertEqual(context.exception.code, "PROVIDER_RESOURCE_UNAVAILABLE")
+        self.assertEqual(context.exception.safe_diagnostics()["http_status_code"], 404)
+        self.assertEqual(context.exception.safe_diagnostics()["provider_status"], "NOT_FOUND")
+
     def test_provider_rate_limit_is_classified(self):
-        fake_client = _FakeClient(_StatusError(429))
+        fake_client = _FakeClient(_StatusError(429, status="RESOURCE_EXHAUSTED"))
         adapter = GeminiExtractionAdapter(
             config=_authorized_config(),
             client_factory=lambda api_key, timeout: fake_client,
             max_retries=0,
         )
 
-        with self.assertRaises(ProviderRateLimit):
+        with self.assertRaises(ProviderRateLimit) as context:
             adapter.extract(_request(), _document())
+
+        self.assertTrue(context.exception.retryable)
+        self.assertEqual(context.exception.safe_diagnostics()["http_status_code"], 429)
+        self.assertEqual(
+            context.exception.safe_diagnostics()["provider_status"],
+            "RESOURCE_EXHAUSTED",
+        )
+
+    def test_provider_rate_limit_is_retried(self):
+        fake_client = _FakeClient(
+            _StatusError(429, status="RESOURCE_EXHAUSTED"),
+            _FakeResponse(_provider_payload()),
+        )
+        adapter = GeminiExtractionAdapter(
+            config=_authorized_config(),
+            client_factory=lambda api_key, timeout: fake_client,
+            max_retries=1,
+            sleep=lambda seconds: None,
+        )
+
+        result = adapter.extract(_request(), _document())
+
+        self.assertEqual(result.extraction_id, "request-001")
+        self.assertEqual(len(fake_client.calls), 2)
 
     def test_provider_unavailable_is_classified(self):
-        fake_client = _FakeClient(_StatusError(503))
+        fake_client = _FakeClient(_StatusError(500, status="INTERNAL"))
         adapter = GeminiExtractionAdapter(
             config=_authorized_config(),
             client_factory=lambda api_key, timeout: fake_client,
             max_retries=0,
         )
 
-        with self.assertRaises(ProviderUnavailable):
+        with self.assertRaises(ProviderUnavailable) as context:
             adapter.extract(_request(), _document())
+
+        self.assertTrue(context.exception.retryable)
+        self.assertEqual(context.exception.safe_diagnostics()["http_status_code"], 500)
+        self.assertEqual(context.exception.safe_diagnostics()["provider_status"], "INTERNAL")
+
+    def test_provider_unavailable_is_retried(self):
+        fake_client = _FakeClient(
+            _StatusError(500, status="INTERNAL"),
+            _FakeResponse(_provider_payload()),
+        )
+        adapter = GeminiExtractionAdapter(
+            config=_authorized_config(),
+            client_factory=lambda api_key, timeout: fake_client,
+            max_retries=1,
+            sleep=lambda seconds: None,
+        )
+
+        result = adapter.extract(_request(), _document())
+
+        self.assertEqual(result.extraction_id, "request-001")
+        self.assertEqual(len(fake_client.calls), 2)
+
+    def test_provider_connection_error_is_classified_and_retried(self):
+        fake_client = _FakeClient(
+            _NetworkSdkError("connection failed with SECRET_TEST_KEY"),
+            _FakeResponse(_provider_payload()),
+        )
+        adapter = GeminiExtractionAdapter(
+            config=_authorized_config(),
+            client_factory=lambda api_key, timeout: fake_client,
+            max_retries=1,
+            sleep=lambda seconds: None,
+        )
+
+        result = adapter.extract(_request(), _document())
+
+        self.assertEqual(result.extraction_id, "request-001")
+        self.assertEqual(len(fake_client.calls), 2)
+
+    def test_provider_connection_error_reports_safe_diagnostics(self):
+        fake_client = _FakeClient(_NetworkSdkError("connection failed with SECRET_TEST_KEY"))
+        adapter = GeminiExtractionAdapter(
+            config=_authorized_config(),
+            client_factory=lambda api_key, timeout: fake_client,
+            max_retries=0,
+        )
+
+        with self.assertRaises(ProviderConnectionError) as context:
+            adapter.extract(_request(), _document())
+
+        self.assertEqual(context.exception.code, "PROVIDER_CONNECTION_ERROR")
+        self.assertTrue(context.exception.retryable)
+        self.assertEqual(
+            context.exception.safe_diagnostics(),
+            {
+                "exception_class": "_NetworkSdkError",
+                "exception_module": _NetworkSdkError.__module__,
+            },
+        )
+        self.assertNotIn("SECRET_TEST_KEY", str(context.exception))
 
 
 if __name__ == "__main__":

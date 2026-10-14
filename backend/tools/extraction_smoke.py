@@ -227,13 +227,15 @@ def run_smoke_test(options: SmokeRunOptions) -> dict[str, Any]:
         status = "succeeded"
     except ExtractionAdapterError as exc:
         status = "failed"
-        errors.append(
-            {
-                "code": exc.code,
-                "message": exc.safe_message,
-                "retryable": exc.retryable,
-            }
-        )
+        error = {
+            "code": exc.code,
+            "message": exc.safe_message,
+            "retryable": exc.retryable,
+        }
+        diagnostics = exc.safe_diagnostics()
+        if diagnostics:
+            error["diagnostics"] = diagnostics
+        errors.append(error)
 
     duration_seconds = round(time.perf_counter() - started, 6)
     return _build_report(

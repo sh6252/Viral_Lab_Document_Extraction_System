@@ -19,9 +19,12 @@ from backend.services.extraction.errors import (
     ExtractionValidationError,
     InvalidUpload,
     InvalidProviderResponse,
+    InvalidProviderRequest,
     MissingProviderCredentials,
+    ProviderConnectionError,
     ProviderNotAuthorized,
     ProviderRateLimit,
+    ProviderResourceUnavailable,
     ProviderTimeout,
     ProviderUnavailable,
     UnsupportedDocumentType,
@@ -77,6 +80,12 @@ def _status_code_for(error: ExtractionAdapterError) -> int:
     if isinstance(error, ProviderNotAuthorized):
         return 403
     if isinstance(error, MissingProviderCredentials):
+        return 503
+    if isinstance(error, InvalidProviderRequest):
+        return 502
+    if isinstance(error, ProviderResourceUnavailable):
+        return 503
+    if isinstance(error, ProviderConnectionError):
         return 503
     if isinstance(error, ProviderTimeout):
         return 504

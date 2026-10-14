@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+SafeDiagnostics = dict[str, str | int]
+
 
 class ExtractionAdapterError(Exception):
     """Base class for adapter errors with safe public messages."""
@@ -9,11 +13,23 @@ class ExtractionAdapterError(Exception):
     code = "EXTRACTION_ADAPTER_ERROR"
     retryable = False
 
-    def __init__(self, safe_message: str, *, retryable: bool | None = None) -> None:
+    def __init__(
+        self,
+        safe_message: str,
+        *,
+        retryable: bool | None = None,
+        diagnostics: SafeDiagnostics | None = None,
+    ) -> None:
         super().__init__(safe_message)
         self.safe_message = safe_message
         if retryable is not None:
             self.retryable = retryable
+        self.diagnostics = diagnostics or {}
+
+    def safe_diagnostics(self) -> dict[str, Any]:
+        """Return diagnostics that are safe for internal tooling reports."""
+
+        return dict(self.diagnostics)
 
 
 class ProviderNotAuthorized(ExtractionAdapterError):
@@ -43,6 +59,19 @@ class ProviderTimeout(ExtractionAdapterError):
 
 class ProviderRateLimit(ExtractionAdapterError):
     code = "PROVIDER_RATE_LIMIT"
+    retryable = True
+
+
+class InvalidProviderRequest(ExtractionAdapterError):
+    code = "INVALID_PROVIDER_REQUEST"
+
+
+class ProviderResourceUnavailable(ExtractionAdapterError):
+    code = "PROVIDER_RESOURCE_UNAVAILABLE"
+
+
+class ProviderConnectionError(ExtractionAdapterError):
+    code = "PROVIDER_CONNECTION_ERROR"
     retryable = True
 
 
