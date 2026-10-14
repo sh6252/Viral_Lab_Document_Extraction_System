@@ -22,6 +22,13 @@ def _env_csv(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return int(value)
+
+
 @dataclass(frozen=True, slots=True)
 class AppConfig:
     app_name: str = "Virology Lab IDP"
@@ -32,6 +39,8 @@ class AppConfig:
     default_extraction_adapter: str = "local_ocr"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
+    max_upload_bytes: int = 20 * 1024 * 1024
+    extraction_pipeline_version: str = "api-v1"
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -42,6 +51,8 @@ class AppConfig:
             default_extraction_adapter=os.getenv("DEFAULT_EXTRACTION_ADAPTER", "local_ocr"),
             gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            max_upload_bytes=_env_int("MAX_UPLOAD_BYTES", 20 * 1024 * 1024),
+            extraction_pipeline_version=os.getenv("EXTRACTION_PIPELINE_VERSION", "api-v1"),
         )
 
     def external_ai_allowed(self, provider_name: str) -> bool:

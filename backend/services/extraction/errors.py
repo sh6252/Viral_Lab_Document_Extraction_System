@@ -24,6 +24,10 @@ class MissingProviderCredentials(ExtractionAdapterError):
     code = "MISSING_PROVIDER_CREDENTIALS"
 
 
+class InvalidUpload(ExtractionAdapterError):
+    code = "INVALID_UPLOAD"
+
+
 class UnsupportedDocumentType(ExtractionAdapterError):
     code = "UNSUPPORTED_DOCUMENT_TYPE"
 
