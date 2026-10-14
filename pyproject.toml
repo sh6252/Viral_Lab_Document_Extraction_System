@@ -30,6 +30,7 @@ include = ["backend*", "evaluation*"]
 evaluation = [
     "schemas/*.json",
     "fixtures/dev/.gitkeep",
+    "fixtures/dev/smoke/*",
     "fixtures/holdout/.gitkeep",
 ]
 

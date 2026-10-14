@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "synthetic-hebrew-commitment-smoke-001",
+  "fixture_set": "dev",
+  "source_document": {
+    "filename": "synthetic_hebrew_commitment.pdf",
+    "sha256": "314298673386b0687f5b2226e6fd2ab3584b0d9ce63891b6cff6091b77a7967b",
+    "page_count": 1
+  },
+  "logical_forms": [
+    {
+      "form_id": "smoke-form-001",
+      "page_indices": [
+        0
+      ],
+      "fields": {
+        "first_name": {
+          "annotation_status": "verified",
+          "value_status": "present",
+          "values": [
+            {
+              "raw": "נועה"
+            }
+          ],
+          "evidence": [
+            {
+              "page_index": 0,
+              "source_kind": "manual_review"
+            }
+          ]
+        },
+        "last_name": {
+          "annotation_status": "verified",
+          "value_status": "present",
+          "values": [
+            {
+              "raw": "כהן"
+            }
+          ],
+          "evidence": [
+            {
+              "page_index": 0,
+              "source_kind": "manual_review"
+            }
+          ]
+        },
+        "israeli_id": {
+          "annotation_status": "verified",
+          "value_status": "present",
+          "values": [
+            {
+              "raw": "001234567"
+            }
+          ],
+          "evidence": [
+            {
+              "page_index": 0,
+              "source_kind": "manual_review"
+            }
+          ]
+        },
+        "central_numbers": {
+          "annotation_status": "verified",
+          "value_status": "present",
+          "values": [
+            {
+              "raw": "00012345"
+            },
+            {
+              "raw": "00012346"
+            }
+          ],
+          "evidence": [
+            {
+              "page_index": 0,
+              "source_kind": "manual_review"
+            }
+          ]
+        },
+        "sample_receipt_date": {
+          "annotation_status": "verified",
+          "value_status": "present",
+          "values": [
+            {
+              "raw": "2026-10-13"
+            }
+          ],
+          "evidence": [
+            {
+              "page_index": 0,
+              "source_kind": "manual_review"
+            }
+          ]
+        },
+        "sender": {
+          "annotation_status": "verified",
+          "value_status": "present",
+          "values": [
+            {
+              "raw": "מרכז רפואי דמו"
+            }
+          ],
+          "evidence": [
+            {
+              "page_index": 0,
+              "source_kind": "manual_review"
+            }
+          ]
+        },
+        "commitment_numbers": {
+          "annotation_status": "verified",
+          "value_status": "present",
+          "values": [
+            {
+              "raw": "HT-00077"
+            },
+            {
+              "raw": "HT-00078"
+            }
+          ],
+          "evidence": [
+            {
+              "page_index": 0,
+              "source_kind": "manual_review"
+            }
+          ]
+        }
+      },
+      "notes": "Synthetic Hebrew smoke-test fixture; no real patient data."
+    }
+  ]
+}

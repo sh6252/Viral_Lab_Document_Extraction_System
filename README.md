@@ -120,6 +120,53 @@ Offline extraction integration tests:
 python -m pytest tests/test_extraction_api.py -q
 ```
 
+### Controlled Extraction Smoke Test
+
+The repository includes one synthetic development fixture:
+
+- `evaluation/fixtures/dev/smoke/synthetic_hebrew_commitment.pdf`
+- `evaluation/fixtures/dev/smoke/synthetic_hebrew_commitment.ground_truth.json`
+
+The fixture contains fictional Hebrew commitment-form data only: a name, an Israeli ID with leading zeros, multiple central laboratory numbers, a sample receipt date marked as received, a synthetic sending organization, and multiple commitment numbers.
+
+Run the default offline smoke test:
+
+```powershell
+python -m backend.tools.extraction_smoke
+```
+
+Run the offline needs-review scenario:
+
+```powershell
+python -m backend.tools.extraction_smoke --mock-scenario needs_review
+```
+
+The smoke report is JSON and includes the document name, provider, duration, schema-validation status, required fields, expected values, actual values, value status, review status, field-level differences, multi-value precision/recall/F1 from the existing evaluator, and safe errors or warnings.
+
+Use redacted reporting when testing any non-synthetic document:
+
+```powershell
+python -m backend.tools.extraction_smoke --document .\path\to\demo.pdf --ground-truth .\path\to\truth.json --redact
+```
+
+Future authorized live Gemini smoke test command, not to be run without explicit approval:
+
+```powershell
+$env:AI_OUTBOUND_ENABLED="true"
+$env:ALLOW_EXTERNAL_PHI="true"
+$env:APPROVED_AI_PROVIDERS="gemini"
+$env:DEFAULT_EXTRACTION_ADAPTER="gemini"
+$env:GEMINI_API_KEY="<approved-demo-key>"
+python -m backend.tools.extraction_smoke `
+  --document evaluation\fixtures\dev\smoke\synthetic_hebrew_commitment.pdf `
+  --ground-truth evaluation\fixtures\dev\smoke\synthetic_hebrew_commitment.ground_truth.json `
+  --live-gemini `
+  --authorize-external-processing `
+  --redact
+```
+
+Live mode still uses the adapter's fail-closed provider policy. The explicit CLI flags do not override server-side restrictions, and an API key alone is never sufficient. Expected API cost is not pinned in this repository; check the current Gemini pricing for the selected model before any live run. A single PDF smoke test may consume input document tokens plus output tokens.
+
 ### Troubleshooting
 
 If PowerShell blocks activation, run:
