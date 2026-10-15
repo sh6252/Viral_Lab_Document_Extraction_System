@@ -41,7 +41,10 @@ HTTP contracts and registry selection. Shared contract tests remain in
 `tests/test_provider_contracts.py`; registry extension uses a synthetic provider.
 These tests do not establish live model accuracy.
 
-The shared prompt version remains `he-commitment-v1`. Task 7's measurement harness
+The active shared prompt is `he-commitment-v1`. Task 8C temporarily tested v2,
+which did not improve measured name accuracy; v1 was restored. See
+`task8c_prompt_experiment.md` for preserved experiment results and closure.
+Task 7's measurement harness
 preserves canonical output, records model/prompt/pipeline versions, validates frozen
 inputs and separately associates single-form/single-page fixtures for scoring.
 Its bounded transient retries and successful-result reuse remain intact. The
