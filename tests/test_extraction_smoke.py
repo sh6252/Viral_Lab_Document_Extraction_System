@@ -15,6 +15,7 @@ from backend.tools.extraction_smoke import (
     SYNTHETIC_GROUND_TRUTH_PATH,
     SYNTHETIC_PDF_PATH,
     _build_request,
+    _build_parser,
     create_synthetic_fixture,
     load_json,
     run_smoke_test,
@@ -31,6 +32,47 @@ GROUND_TRUTH_SCHEMA = json.loads(
 
 
 class ExtractionSmokeTests(unittest.TestCase):
+    def test_provider_choices_follow_registry(self):
+        with patch(
+            "backend.tools.extraction_smoke.registered_provider_names",
+            return_value=("future_provider",),
+        ):
+            args = _build_parser().parse_args(["--provider", "future_provider"])
+        self.assertEqual(args.provider, "future_provider")
+
+    def test_openai_requires_explicit_cli_authorization(self):
+        with patch("backend.tools.extraction_smoke.build_extraction_adapter") as factory:
+            report = run_smoke_test(SmokeRunOptions(provider="openai"))
+        factory.assert_not_called()
+        self.assertEqual(report["errors"][0]["code"], "PROVIDER_NOT_AUTHORIZED")
+        self.assertEqual(report["provider"]["name"], "openai")
+
+    def test_conflicting_provider_flags_do_not_construct_any_live_adapter(self):
+        with patch("backend.tools.extraction_smoke.build_extraction_adapter") as factory:
+            report = run_smoke_test(SmokeRunOptions(
+                provider="openai", live_gemini=True, authorize_external_processing=True,
+            ))
+        factory.assert_not_called()
+        self.assertEqual(report["errors"][0]["code"], "PROVIDER_NOT_AUTHORIZED")
+
+    def test_openai_cli_selection_reaches_factory_and_propagates_request_policy(self):
+        adapter = OfflineSmokeExtractionAdapter(load_json(SYNTHETIC_GROUND_TRUTH_PATH))
+        with patch(
+            "backend.tools.extraction_smoke.build_extraction_adapter", return_value=adapter
+        ) as factory:
+            report = run_smoke_test(SmokeRunOptions(
+                provider="openai", authorize_external_processing=True,
+            ))
+        self.assertEqual(factory.call_args.args[0].default_extraction_adapter, "openai")
+        self.assertEqual(report["extraction_status"], "succeeded")
+        self.assertEqual(report["prompt_version"], "he-commitment-v1")
+        self.assertTrue(report["pipeline_version"])
+        request = _build_request(
+            options=SmokeRunOptions(provider="openai", authorize_external_processing=True),
+            ground_truth=load_json(SYNTHETIC_GROUND_TRUTH_PATH),
+        )
+        self.assertTrue(request.provider_policy.allow_external_phi)
+
     def test_synthetic_pdf_creation(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             pdf_path = Path(temp_dir) / "synthetic.pdf"
@@ -157,8 +199,8 @@ class ExtractionSmokeTests(unittest.TestCase):
 
     def test_default_mode_makes_no_provider_network_calls(self):
         with patch(
-            "backend.tools.extraction_smoke.GeminiExtractionAdapter",
-            side_effect=AssertionError("Gemini adapter must not be constructed"),
+            "backend.tools.extraction_smoke.build_extraction_adapter",
+            side_effect=AssertionError("Live adapter must not be constructed"),
         ):
             report = run_smoke_test(SmokeRunOptions())
 
@@ -190,7 +232,7 @@ class ExtractionSmokeTests(unittest.TestCase):
                 )
 
         with patch(
-            "backend.tools.extraction_smoke.GeminiExtractionAdapter",
+            "backend.tools.extraction_smoke.build_extraction_adapter",
             return_value=_FailingAdapter(),
         ), patch.dict("os.environ", {"GEMINI_API_KEY": "VERY_SECRET_TEST_KEY"}, clear=False):
             report = run_smoke_test(

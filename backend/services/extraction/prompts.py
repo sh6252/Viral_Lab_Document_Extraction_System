@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from backend.domain.models import RequiredFieldName
 
-GEMINI_EXTRACTION_PROMPT_VERSION = "gemini-he-commitment-v1"
+EXTRACTION_PROMPT_VERSION = "he-commitment-v1"
+GEMINI_EXTRACTION_PROMPT_VERSION = EXTRACTION_PROMPT_VERSION
+OPENAI_EXTRACTION_PROMPT_VERSION = EXTRACTION_PROMPT_VERSION
 
 
-def build_gemini_extraction_prompt(fields: list[RequiredFieldName], locale: str) -> str:
+def build_extraction_prompt(fields: list[RequiredFieldName], locale: str) -> str:
     field_list = ", ".join(fields)
     return f"""
 You extract structured fields from Hebrew medical commitment forms for the Central Virology Laboratory.
 Locale: {locale}
-Prompt version: {GEMINI_EXTRACTION_PROMPT_VERSION}
+Prompt version: {EXTRACTION_PROMPT_VERSION}
 
 Return only valid JSON with this shape:
 {{
@@ -42,3 +44,11 @@ Use "ambiguous" when multiple interpretations are possible.
 Do not approve fields or records. Do not include review approvals.
 Do not include explanations outside the JSON object.
 """.strip()
+
+
+def build_gemini_extraction_prompt(fields: list[RequiredFieldName], locale: str) -> str:
+    return build_extraction_prompt(fields, locale)
+
+
+def build_openai_extraction_prompt(fields: list[RequiredFieldName], locale: str) -> str:
+    return build_extraction_prompt(fields, locale)

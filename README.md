@@ -4,7 +4,7 @@ Central Virology Laboratory document extraction system.
 
 ## Python Development Setup
 
-The project currently contains the evaluation foundation, FastAPI backend foundation, domain contracts, policy-gated Gemini extraction adapter, and a minimal document extraction API orchestration path. Database, frontend, OCR, permanent storage, background jobs, authentication, and Excel export are not implemented yet.
+The project currently contains the evaluation foundation, FastAPI backend foundation, domain contracts, policy-gated Gemini and OpenAI extraction adapters, a shared provider factory, and a minimal document extraction API orchestration path. Database, frontend, OCR, permanent storage, background jobs, authentication, and Excel export are not implemented yet. Provider integration is verified with offline synthetic tests; live OpenAI compatibility and model accuracy are not established.
 
 ### Requirements
 
@@ -102,9 +102,15 @@ MAX_UPLOAD_BYTES=20971520
 EXTRACTION_PIPELINE_VERSION=api-v1
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1
 ```
 
 Gemini extraction remains disabled unless `AI_OUTBOUND_ENABLED=true`, `ALLOW_EXTERNAL_PHI=true`, `APPROVED_AI_PROVIDERS` includes `gemini`, the request-level provider policy permits `external_phi`, and `GEMINI_API_KEY` is set. Unit tests use a fake Gemini client and do not make real external AI calls.
+
+OpenAI uses the same policy gates with provider name `openai`, `OPENAI_API_KEY`, and `DEFAULT_EXTRACTION_ADAPTER=openai`. Choose the provider through configuration; HTTP request and response contracts stay the same. Both adapters are built by `backend/services/extraction/registry.py`. A configured unknown provider fails application construction explicitly. `.env` files are not loaded automatically: export the variables in the process environment or configure your launcher to load them.
+
+See [provider integration](docs/provider_integration.md) for extension points, offline validation, and remaining limitations.
 
 Current extraction limitations:
 
@@ -160,12 +166,14 @@ $env:GEMINI_API_KEY="<approved-demo-key>"
 python -m backend.tools.extraction_smoke `
   --document evaluation\fixtures\dev\smoke\synthetic_hebrew_commitment.pdf `
   --ground-truth evaluation\fixtures\dev\smoke\synthetic_hebrew_commitment.ground_truth.json `
-  --live-gemini `
+  --provider gemini `
   --authorize-external-processing `
   --redact
 ```
 
 Live mode still uses the adapter's fail-closed provider policy. The explicit CLI flags do not override server-side restrictions, and an API key alone is never sufficient. Expected API cost is not pinned in this repository; check the current Gemini pricing for the selected model before any live run. A single PDF smoke test may consume input document tokens plus output tokens.
+
+The equivalent OpenAI selection is `--provider openai`, with `APPROVED_AI_PROVIDERS` including `openai` and `OPENAI_API_KEY` configured. It requires the same explicit authorization; do not run it on real patient records without the approved data policy. The default remains `--provider offline_mock`. `--live-gemini` is retained as a deprecated alias and cannot be combined with a different provider.
 
 ### Troubleshooting
 

@@ -39,6 +39,8 @@ class AppConfig:
     default_extraction_adapter: str = "local_ocr"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4.1"
     max_upload_bytes: int = 20 * 1024 * 1024
     extraction_pipeline_version: str = "api-v1"
 
@@ -51,6 +53,8 @@ class AppConfig:
             default_extraction_adapter=os.getenv("DEFAULT_EXTRACTION_ADAPTER", "local_ocr"),
             gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
             max_upload_bytes=_env_int("MAX_UPLOAD_BYTES", 20 * 1024 * 1024),
             extraction_pipeline_version=os.getenv("EXTRACTION_PIPELINE_VERSION", "api-v1"),
         )
@@ -63,3 +67,17 @@ class AppConfig:
             and self.allow_external_phi
             and provider_name in self.approved_ai_providers
         )
+
+    def provider_api_key(self, provider_name: str) -> str | None:
+        if provider_name == "gemini":
+            return self.gemini_api_key
+        if provider_name == "openai":
+            return self.openai_api_key
+        return None
+
+    def provider_model(self, provider_name: str) -> str | None:
+        if provider_name == "gemini":
+            return self.gemini_model
+        if provider_name == "openai":
+            return self.openai_model
+        return None

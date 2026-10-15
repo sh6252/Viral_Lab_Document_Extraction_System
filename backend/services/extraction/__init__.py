@@ -18,7 +18,9 @@ from backend.services.extraction.errors import (
     UnsupportedDocumentType,
 )
 from backend.services.extraction.gemini_adapter import GeminiExtractionAdapter
+from backend.services.extraction.openai_adapter import OpenAIExtractionAdapter
 from backend.services.extraction.orchestrator import ExtractionOrchestrator
+from backend.services.extraction.registry import build_extraction_adapter, registered_provider_names
 
 __all__ = [
     "DocumentTooLarge",
@@ -32,6 +34,7 @@ __all__ = [
     "InvalidProviderResponse",
     "InvalidProviderRequest",
     "MissingProviderCredentials",
+    "OpenAIExtractionAdapter",
     "ProviderConnectionError",
     "ProviderNotAuthorized",
     "ProviderRateLimit",
@@ -39,4 +42,6 @@ __all__ = [
     "ProviderTimeout",
     "ProviderUnavailable",
     "UnsupportedDocumentType",
+    "build_extraction_adapter",
+    "registered_provider_names",
 ]

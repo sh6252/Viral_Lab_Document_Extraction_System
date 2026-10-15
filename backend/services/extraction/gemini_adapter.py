@@ -7,12 +7,13 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
 from backend.core.config import AppConfig
-from backend.domain import ExtractionFields, ExtractionRequest, ExtractionResult, FieldResult
-from backend.domain.models import LogicalFormResult, ProviderMetadata, RequiredFieldName
+from backend.domain import ExtractionRequest, ExtractionResult
+from backend.domain.models import ProviderMetadata
 from backend.services.extraction.base import DocumentInput, ExtractionAdapter
+from backend.services.extraction.canonical import ProviderPayload, to_canonical_result
 from backend.services.extraction.errors import (
     DocumentTooLarge,
     ExtractionAdapterError,
@@ -27,6 +28,10 @@ from backend.services.extraction.errors import (
     UnsupportedDocumentType,
 )
 from backend.services.extraction.policy import ProviderPolicy
+from backend.services.extraction.provider_errors import (
+    is_transport_error,
+    safe_provider_diagnostics,
+)
 from backend.services.extraction.prompts import build_gemini_extraction_prompt
 from backend.services.extraction.schema_validation import validate_extraction_result_schema
 
@@ -36,20 +41,6 @@ DEFAULT_MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 
 ClientFactory = Callable[[str, int], Any]
 SleepFn = Callable[[float], None]
-
-
-class _ProviderLogicalForm(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    form_id: str | None = Field(default=None, min_length=1)
-    fields: ExtractionFields
-
-
-class _ProviderPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    logical_forms: list[_ProviderLogicalForm] | None = None
-    fields: ExtractionFields | None = None
 
 
 class GeminiExtractionAdapter(ExtractionAdapter):
@@ -87,7 +78,13 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         client = self._client_factory(self._config.gemini_api_key or "", self._timeout_seconds)
         response = self._generate_with_retries(client, prompt, document)
         payload = self._parse_provider_payload(response)
-        result = self._to_canonical_result(request, payload)
+        result = to_canonical_result(
+            request,
+            payload,
+            ProviderMetadata(
+                name=self.provider_name, mode="vision_ai", version=self._config.gemini_model
+            ),
+        )
         validate_extraction_result_schema(result)
         return result
 
@@ -130,7 +127,7 @@ class GeminiExtractionAdapter(ExtractionAdapter):
             config=config,
         )
 
-    def _parse_provider_payload(self, response: Any) -> _ProviderPayload:
+    def _parse_provider_payload(self, response: Any) -> ProviderPayload:
         raw_payload = getattr(response, "parsed", None)
         if raw_payload is None:
             raw_payload = getattr(response, "text", response)
@@ -142,68 +139,12 @@ class GeminiExtractionAdapter(ExtractionAdapter):
                 raise InvalidProviderResponse("AI provider returned non-JSON content.") from exc
 
         try:
-            return _ProviderPayload.model_validate(raw_payload)
+            return ProviderPayload.model_validate(raw_payload)
         except ValidationError as exc:
             raise InvalidProviderResponse("AI provider response did not match the expected structure.") from exc
 
-    def _to_canonical_result(
-        self,
-        request: ExtractionRequest,
-        payload: _ProviderPayload,
-    ) -> ExtractionResult:
-        logical_forms = payload.logical_forms
-        if logical_forms is None:
-            if payload.fields is None:
-                raise InvalidProviderResponse("AI provider response did not include extracted fields.")
-            logical_forms = [_ProviderLogicalForm(form_id=request.logical_form_id, fields=payload.fields)]
-
-        canonical_forms: list[LogicalFormResult] = []
-        for form in logical_forms:
-            fields = self._sanitize_fields(form.fields, request.fields)
-            canonical_forms.append(
-                LogicalFormResult(
-                    form_id=form.form_id or request.logical_form_id,
-                    fields=fields,
-                )
-            )
-
-        return ExtractionResult(
-            extraction_id=request.request_id,
-            provider=ProviderMetadata(
-                name=self.provider_name,
-                mode="vision_ai",
-                version=self._config.gemini_model,
-            ),
-            logical_forms=canonical_forms,
-        )
-
-    def _sanitize_fields(
-        self,
-        fields: ExtractionFields,
-        requested_fields: list[RequiredFieldName],
-    ) -> ExtractionFields:
-        sanitized: dict[str, FieldResult] = {}
-        for field_name in requested_fields:
-            field_result = getattr(fields, field_name)
-            if field_result is None:
-                continue
-            if field_result.value_status == "present" and not field_result.values:
-                raise InvalidProviderResponse("AI provider marked a field present without values.")
-            if field_result.value_status != "present" and field_result.values:
-                raise InvalidProviderResponse("AI provider returned values for a non-present field.")
-            if field_result.review_status in {
-                "approved_as_extracted",
-                "approved_corrected",
-                "corrected",
-            }:
-                raise InvalidProviderResponse("AI provider is not allowed to approve or correct fields.")
-
-            review_status = "unreviewed" if field_result.value_status == "present" else "needs_review"
-            sanitized[field_name] = field_result.model_copy(update={"review_status": review_status})
-        return ExtractionFields(**sanitized)
-
     def _classify_provider_error(self, exc: Exception) -> ExtractionAdapterError:
-        diagnostics = _safe_provider_diagnostics(exc)
+        diagnostics = safe_provider_diagnostics(exc)
         status_code = diagnostics.get("http_status_code")
         name = type(exc).__name__.lower()
         if isinstance(exc, TimeoutError) or "timeout" in name:
@@ -236,7 +177,7 @@ class GeminiExtractionAdapter(ExtractionAdapter):
                 "AI provider is temporarily unavailable.",
                 diagnostics=diagnostics,
             )
-        if _is_transport_error(exc):
+        if is_transport_error(exc):
             return ProviderConnectionError(
                 "AI provider connection failed.",
                 diagnostics=diagnostics,
@@ -259,50 +200,3 @@ class GeminiExtractionAdapter(ExtractionAdapter):
             api_key=api_key,
             http_options=types.HttpOptions(timeout=timeout_seconds * 1000),
         )
-
-
-def _safe_provider_diagnostics(exc: Exception) -> dict[str, str | int]:
-    diagnostics: dict[str, str | int] = {
-        "exception_class": type(exc).__name__,
-        "exception_module": type(exc).__module__,
-    }
-    status_code = _extract_status_code(exc)
-    if status_code is not None:
-        diagnostics["http_status_code"] = status_code
-    provider_status = getattr(exc, "status", None)
-    if isinstance(provider_status, str) and provider_status:
-        diagnostics["provider_status"] = provider_status
-    return diagnostics
-
-
-def _extract_status_code(exc: Exception) -> int | None:
-    for candidate in (
-        getattr(exc, "status_code", None),
-        getattr(getattr(exc, "response", None), "status_code", None),
-        getattr(exc, "code", None),
-    ):
-        if isinstance(candidate, int):
-            return candidate
-        if isinstance(candidate, str) and candidate.isdecimal():
-            return int(candidate)
-    return None
-
-
-def _is_transport_error(exc: Exception) -> bool:
-    if isinstance(exc, ConnectionError):
-        return True
-    name = type(exc).__name__.lower()
-    module = type(exc).__module__.lower()
-    transport_markers = (
-        "connect",
-        "connection",
-        "network",
-        "transport",
-        "socket",
-        "ssl",
-        "tls",
-        "proxy",
-        "dns",
-        "nameresolution",
-    )
-    return any(marker in name or marker in module for marker in transport_markers)

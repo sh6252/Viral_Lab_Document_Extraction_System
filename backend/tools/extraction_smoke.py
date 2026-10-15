@@ -1,7 +1,7 @@
 """Controlled extraction smoke-test runner.
 
 The default path is fully offline and uses a deterministic mock adapter. Live
-Gemini execution requires explicit CLI authorization and the existing provider
+Provider execution requires explicit CLI authorization and the existing provider
 policy checks; this module does not weaken or bypass the adapter policy.
 """
 
@@ -11,7 +11,7 @@ import argparse
 import hashlib
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -29,9 +29,15 @@ from backend.domain import (
     ProviderMetadata,
     ProviderPolicySnapshot,
 )
-from backend.services.extraction import DocumentInput, ExtractionAdapter, GeminiExtractionAdapter
-from backend.services.extraction.errors import ExtractionAdapterError, ProviderNotAuthorized
+from backend.services.extraction.base import DocumentInput, ExtractionAdapter
+from backend.services.extraction.errors import (
+    ExtractionAdapterError,
+    ProviderNotAuthorized,
+    ProviderUnavailable,
+)
 from backend.services.extraction.orchestrator import ExtractionOrchestrator
+from backend.services.extraction.prompts import EXTRACTION_PROMPT_VERSION
+from backend.services.extraction.registry import build_extraction_adapter, registered_provider_names
 from backend.services.extraction.schema_validation import validate_extraction_result_schema
 from backend.services.extraction.upload_validation import detect_supported_mime_type
 from evaluation.scoring import REQUIRED_FIELDS, score_extraction
@@ -59,6 +65,7 @@ SYNTHETIC_VALUES = {
 class SmokeRunOptions:
     document_path: Path = SYNTHETIC_PDF_PATH
     ground_truth_path: Path = SYNTHETIC_GROUND_TRUTH_PATH
+    provider: str = "offline_mock"
     live_gemini: bool = False
     authorize_external_processing: bool = False
     mock_scenario: str = "perfect"
@@ -194,6 +201,7 @@ def validate_ground_truth(ground_truth: dict[str, Any]) -> None:
 
 def run_smoke_test(options: SmokeRunOptions) -> dict[str, Any]:
     started = time.perf_counter()
+    provider_name = _selected_provider(options)
     ground_truth = load_json(options.ground_truth_path)
     validate_ground_truth(ground_truth)
 
@@ -248,7 +256,9 @@ def run_smoke_test(options: SmokeRunOptions) -> dict[str, Any]:
         scoring=scoring,
         errors=errors,
         redact=options.redact,
-        live_gemini=options.live_gemini,
+        provider_name=provider_name,
+        used_live_gemini_alias=options.live_gemini,
+        pipeline_version=request.pipeline_version,
     )
 
 
@@ -264,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     options = SmokeRunOptions(
         document_path=args.document,
         ground_truth_path=args.ground_truth,
+        provider=args.provider,
         live_gemini=args.live_gemini,
         authorize_external_processing=args.authorize_external_processing,
         mock_scenario=args.mock_scenario,
@@ -283,6 +294,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--document", type=Path, default=SYNTHETIC_PDF_PATH)
     parser.add_argument("--ground-truth", type=Path, default=SYNTHETIC_GROUND_TRUTH_PATH)
     parser.add_argument("--mock-scenario", choices=["perfect", "needs_review"], default="perfect")
+    parser.add_argument(
+        "--provider", choices=["offline_mock", *registered_provider_names()], default="offline_mock"
+    )
     parser.add_argument("--live-gemini", action="store_true")
     parser.add_argument("--authorize-external-processing", action="store_true")
     parser.add_argument("--redact", action="store_true")
@@ -295,13 +309,20 @@ def _build_adapter(
     options: SmokeRunOptions,
     ground_truth: dict[str, Any],
 ) -> ExtractionAdapter:
-    if not options.live_gemini:
+    if options.live_gemini and options.provider not in {"offline_mock", "gemini"}:
+        raise ProviderNotAuthorized("Conflicting smoke-test provider options.")
+    provider_name = _selected_provider(options)
+    if provider_name == "offline_mock":
         return OfflineSmokeExtractionAdapter(ground_truth, scenario=options.mock_scenario)
     if not options.authorize_external_processing:
         raise ProviderNotAuthorized(
-            "Live Gemini smoke test requires explicit request-level authorization."
+            "Live provider smoke test requires explicit request-level authorization."
         )
-    return GeminiExtractionAdapter(config=AppConfig.from_env())
+    config = replace(AppConfig.from_env(), default_extraction_adapter=provider_name)
+    adapter = build_extraction_adapter(config)
+    if adapter is None:
+        raise ProviderUnavailable("No live extraction adapter is configured for this provider.")
+    return adapter
 
 
 def _build_request(
@@ -322,6 +343,12 @@ def _build_request(
             allow_external_phi=options.authorize_external_processing,
         ),
     )
+
+
+def _selected_provider(options: SmokeRunOptions) -> str:
+    if options.live_gemini:
+        return "gemini"
+    return options.provider
 
 
 def _truth_fields_to_extraction_fields(
@@ -365,28 +392,46 @@ def _build_report(
     scoring: dict[str, Any] | None,
     errors: list[dict[str, Any]],
     redact: bool,
-    live_gemini: bool,
+    provider_name: str,
+    used_live_gemini_alias: bool,
+    pipeline_version: str,
 ) -> dict[str, Any]:
     actual_payload = (
         extraction_result.model_dump(mode="json", exclude_none=True) if extraction_result else {}
     )
     provider = actual_payload.get(
         "provider",
-        {"name": "gemini" if live_gemini else "offline_smoke_mock", "mode": "mock"},
+        _fallback_provider_metadata(provider_name),
     )
     return {
         "document_name": document_path.name,
         "extraction_status": status,
         "provider": provider,
         "model": provider.get("version"),
+        "pipeline_version": pipeline_version,
+        "prompt_version": EXTRACTION_PROMPT_VERSION if provider_name != "offline_mock" else None,
         "duration_seconds": duration_seconds,
         "required_fields": list(REQUIRED_FIELDS),
         "schema_validation": schema_validation,
         "field_results": _field_report(ground_truth, actual_payload, redact=redact),
         "scoring": scoring,
         "errors": errors,
-        "warnings": _report_warnings(live_gemini=live_gemini, redact=redact),
+        "warnings": _report_warnings(
+            provider_name=provider_name,
+            redact=redact,
+            used_live_gemini_alias=used_live_gemini_alias,
+        ),
     }
+
+
+def _fallback_provider_metadata(provider_name: str) -> dict[str, str]:
+    if provider_name == "offline_mock":
+        return {"name": provider_name, "mode": "mock"}
+    metadata = {"name": provider_name, "mode": "vision_ai"}
+    model = AppConfig.from_env().provider_model(provider_name)
+    if model:
+        metadata["version"] = model
+    return metadata
 
 
 def _field_report(
@@ -433,13 +478,20 @@ def _maybe_redact(values: list[str], *, redact: bool) -> list[str]:
     return ["[REDACTED]" for _ in values]
 
 
-def _report_warnings(*, live_gemini: bool, redact: bool) -> list[str]:
+def _report_warnings(
+    *,
+    provider_name: str,
+    redact: bool,
+    used_live_gemini_alias: bool,
+) -> list[str]:
     warnings = [
         "Smoke workflow is not a production accuracy claim.",
         "Authentication and access control are not implemented yet.",
     ]
-    if live_gemini:
-        warnings.append("Live Gemini mode may transmit the uploaded document to an external provider.")
+    if provider_name != "offline_mock":
+        warnings.append("Live provider mode may transmit the uploaded document to an external provider.")
+    if used_live_gemini_alias:
+        warnings.append("--live-gemini is deprecated; use --provider gemini for new smoke runs.")
     if redact:
         warnings.append("Report values are redacted.")
     return warnings
