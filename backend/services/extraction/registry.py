@@ -8,7 +8,6 @@ from backend.core.config import AppConfig
 from backend.services.extraction.base import ExtractionAdapter
 from backend.services.extraction.errors import ProviderUnavailable
 from backend.services.extraction.gemini_adapter import GeminiExtractionAdapter
-from backend.services.extraction.openai_adapter import OpenAIExtractionAdapter
 
 
 AdapterBuilder = Callable[[AppConfig], ExtractionAdapter]
@@ -16,9 +15,6 @@ AdapterBuilder = Callable[[AppConfig], ExtractionAdapter]
 NO_ADAPTER_VALUES = {"", "local_ocr", "none"}
 ADAPTER_BUILDERS: dict[str, AdapterBuilder] = {
     "gemini": lambda config: GeminiExtractionAdapter(
-        config=config, max_document_bytes=config.max_upload_bytes
-    ),
-    "openai": lambda config: OpenAIExtractionAdapter(
         config=config, max_document_bytes=config.max_upload_bytes
     ),
 }

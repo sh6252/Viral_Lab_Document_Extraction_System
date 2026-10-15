@@ -40,35 +40,35 @@ class ExtractionSmokeTests(unittest.TestCase):
             args = _build_parser().parse_args(["--provider", "future_provider"])
         self.assertEqual(args.provider, "future_provider")
 
-    def test_openai_requires_explicit_cli_authorization(self):
+    def test_live_provider_requires_explicit_cli_authorization(self):
         with patch("backend.tools.extraction_smoke.build_extraction_adapter") as factory:
-            report = run_smoke_test(SmokeRunOptions(provider="openai"))
+            report = run_smoke_test(SmokeRunOptions(provider="gemini"))
         factory.assert_not_called()
         self.assertEqual(report["errors"][0]["code"], "PROVIDER_NOT_AUTHORIZED")
-        self.assertEqual(report["provider"]["name"], "openai")
+        self.assertEqual(report["provider"]["name"], "gemini")
 
     def test_conflicting_provider_flags_do_not_construct_any_live_adapter(self):
         with patch("backend.tools.extraction_smoke.build_extraction_adapter") as factory:
             report = run_smoke_test(SmokeRunOptions(
-                provider="openai", live_gemini=True, authorize_external_processing=True,
+                provider="future_provider", live_gemini=True, authorize_external_processing=True,
             ))
         factory.assert_not_called()
         self.assertEqual(report["errors"][0]["code"], "PROVIDER_NOT_AUTHORIZED")
 
-    def test_openai_cli_selection_reaches_factory_and_propagates_request_policy(self):
+    def test_live_provider_cli_selection_reaches_factory_and_propagates_request_policy(self):
         adapter = OfflineSmokeExtractionAdapter(load_json(SYNTHETIC_GROUND_TRUTH_PATH))
         with patch(
             "backend.tools.extraction_smoke.build_extraction_adapter", return_value=adapter
         ) as factory:
             report = run_smoke_test(SmokeRunOptions(
-                provider="openai", authorize_external_processing=True,
+                provider="gemini", authorize_external_processing=True,
             ))
-        self.assertEqual(factory.call_args.args[0].default_extraction_adapter, "openai")
+        self.assertEqual(factory.call_args.args[0].default_extraction_adapter, "gemini")
         self.assertEqual(report["extraction_status"], "succeeded")
         self.assertEqual(report["prompt_version"], "he-commitment-v1")
         self.assertTrue(report["pipeline_version"])
         request = _build_request(
-            options=SmokeRunOptions(provider="openai", authorize_external_processing=True),
+            options=SmokeRunOptions(provider="gemini", authorize_external_processing=True),
             ground_truth=load_json(SYNTHETIC_GROUND_TRUTH_PATH),
         )
         self.assertTrue(request.provider_policy.allow_external_phi)

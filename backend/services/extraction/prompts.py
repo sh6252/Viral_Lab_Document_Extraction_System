@@ -6,7 +6,6 @@ from backend.domain.models import RequiredFieldName
 
 EXTRACTION_PROMPT_VERSION = "he-commitment-v1"
 GEMINI_EXTRACTION_PROMPT_VERSION = EXTRACTION_PROMPT_VERSION
-OPENAI_EXTRACTION_PROMPT_VERSION = EXTRACTION_PROMPT_VERSION
 
 
 def build_extraction_prompt(fields: list[RequiredFieldName], locale: str) -> str:
@@ -47,8 +46,4 @@ Do not include explanations outside the JSON object.
 
 
 def build_gemini_extraction_prompt(fields: list[RequiredFieldName], locale: str) -> str:
-    return build_extraction_prompt(fields, locale)
-
-
-def build_openai_extraction_prompt(fields: list[RequiredFieldName], locale: str) -> str:
     return build_extraction_prompt(fields, locale)
