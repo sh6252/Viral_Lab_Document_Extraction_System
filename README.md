@@ -191,8 +191,9 @@ If `uvicorn` is not found, activate `.venv` and rerun `python -m pip install -e 
 
 ## Internal review persistence (Task 10H)
 
-This PostgreSQL slice is available only to explicit internal callers. It is not
-connected to API routes/startup, authentication, OCR/providers or Excel. The existing
+This PostgreSQL slice is constructed only through explicit injection; startup does
+not create a DB connection. Task 10J adds fail-closed review routes as described
+below, without a production authenticator, OCR/providers or Excel. The existing
 pure workflow remains authoritative for decision rules; approved OCR values never
 overwrite canonical extraction. See [persistence design](docs/review_persistence_design.md).
 
@@ -251,3 +252,43 @@ parameters; never enable SQL debug logging or log DSNs, snapshots or decision te
 Private source files are not stored as image/PDF bytes in these tables. Stable
 runtime artifact storage, authentication, retention policy and explicit re-review
 supersession remain separate work; the current one-decision gate is unchanged.
+
+## Fail-closed review API boundary (Task 10J)
+
+The application registers only these new operations:
+
+- `GET /api/v1/review-sessions/{session_id}`
+- `POST /api/v1/review-sessions/{session_id}/decisions`
+
+Review access fails closed in the ordinary application: no injected authenticator
+returns **401**, no authorization policy grants no resource visibility, and no
+missing dependency creates anonymous or default access. No identity provider,
+login/user store, ACL store or header-based production auth was implemented.
+Existing extraction and health behavior is unchanged.
+
+An explicitly configured runtime/test caller supplies `review_api_service`,
+`review_authenticator` and `review_authorization_policy` to `create_app`. The
+authenticator must independently verify credentials; a broad role or unverified
+header is not a document/form grant. The policy checks the exact principal and
+session/document/form for read, submit and source operations separately. Read-only
+requests never construct a writable `TrustedReviewContext`. No DB engine is
+implicitly opened, and no API operation invokes OCR, Gemini, merge or export.
+
+GET returns a selected-form DTO with actionable values, issue indicators and
+server-derived capabilities, excluding full canonical snapshots, codec data,
+other forms, trusted principal identity and storage paths. POST uses strict DTOs;
+human `reviewer_reference` and `declared_reviewed_at` remain untrusted metadata.
+Clients keep decision ID/content/declared time stable across retries. The existing
+durable gate still determines replay, revisions, approval and actor attribution.
+Responses and review-specific sanitized errors use `Cache-Control: no-store`.
+
+Artifact access is descriptor-only. Without an explicitly injected trusted resolver,
+evidence is unavailable; there is no artifact streaming route, evaluation-path
+resolver, public URL or signed URL implementation. Shared-page bindings are refused
+by this slice. No new dependencies, UI or canonical field mutations were added.
+
+See [review API design and implementation record](docs/review_api_design.md) for
+DTOs, error mapping, privacy boundaries and validation. Synthetic injected adapters
+exist only in tests and must not be deployed as an authenticator. Production
+identity/ACL configuration, source storage, ASGI/proxy access-log redaction and
+deployment security remain prerequisites for any public rollout.

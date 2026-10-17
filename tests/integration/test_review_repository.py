@@ -328,3 +328,57 @@ def test_unknown_codec_and_projection_corruption_fail_closed(repository, pg_engi
         conn.execute(text("ALTER TABLE review_sessions ENABLE TRIGGER USER"))
     with pytest.raises(codec.ReviewIntegrityError):
         repository.get(original.session_id)
+
+
+def test_scope_lookup_reads_only_identity_columns(repository, pg_engine, monkeypatch):
+    from sqlalchemy import event
+    from backend.core.review_access import ReviewResourceScope
+    original = create(repository)
+    observed = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        observed.append(statement)
+
+    monkeypatch.setattr(repository, "_load", lambda *args: pytest.fail("scope lookup must not load aggregate"))
+    event.listen(pg_engine, "before_cursor_execute", capture)
+    try:
+        scope = repository.get_scope(original.session_id)
+    finally:
+        event.remove(pg_engine, "before_cursor_execute", capture)
+    assert scope == ReviewResourceScope(original.session_id, original.document_id, original.form_id)
+    assert len(observed) == 1
+    for forbidden in ("canonical_snapshot", "preparation_json", "review_events", "review_items", "current_projection"):
+        assert forbidden not in observed[0]
+
+
+def test_unknown_scope_has_safe_not_found(repository):
+    with pytest.raises(ReviewPersistenceError, match="^REVIEW_SESSION_NOT_FOUND$"):
+        repository.get_scope("unknown-synthetic-session")
+
+
+def test_api_adapter_uses_durable_decision_replay_after_reconnect(repository, pg_engine):
+    from fastapi.testclient import TestClient
+    from backend.main import create_app
+    from backend.services.review_api import ReviewAPIService
+    from tests.test_review_api import SyntheticAuthenticator, ExactPolicy, PRINCIPAL, body, PATH
+
+    original = create(repository)
+    policy = ExactPolicy(repository.get_scope(original.session_id))
+    client = TestClient(create_app(review_api_service=ReviewAPIService(repository),
+                                  review_authenticator=SyntheticAuthenticator(), review_authorization_policy=policy))
+    request = body(original, reviewed_value=" 000-12/3) בדיקה ")
+    first = client.post(PATH + "/decisions", json=request)
+    assert first.status_code == 200 and first.json()["replay"] is False
+    pg_engine.dispose()
+    reconnected = ReviewSessionRepository(pg_engine)
+    client = TestClient(create_app(review_api_service=ReviewAPIService(reconnected),
+                                  review_authenticator=SyntheticAuthenticator(), review_authorization_policy=policy))
+    replay = client.post(PATH + "/decisions", json=request)
+    assert replay.status_code == 200 and replay.json()["replay"] is True
+    assert replay.json()["revision"] == 1
+    assert reconnected.get(original.session_id).canonical_snapshot_json == original.canonical_snapshot_json
+    history = reconnected.get_history(original.session_id)
+    assert len(history) == 1 and history[0].principal_subject == PRINCIPAL.subject
+    assert history[0].decision.reviewer_reference == "review-api-v1:reference-omitted"
+    denied = client.post(PATH + "/decisions", json={**request, "reviewer_note": "different"})
+    assert denied.status_code == 409 and len(reconnected.get_history(original.session_id)) == 1

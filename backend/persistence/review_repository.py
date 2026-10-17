@@ -11,6 +11,7 @@ from sqlalchemy import Engine, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
+from backend.core.review_access import ReviewResourceScope
 from backend.persistence import review_codec as codec
 from backend.persistence.review_models import events, items, sessions
 from backend.services.extraction.ocr_candidates import OCRCandidate
@@ -191,6 +192,16 @@ class ReviewSessionRepository:
             if any(root[name] != value for name, value in columns.items()):
                 raise ReviewPersistenceError("REVIEW_SESSION_CREATE_CONFLICT")
             return self._load(conn, root)
+
+    @_safe
+    def get_scope(self, session_id: str) -> ReviewResourceScope:
+        """Identity metadata only, before authorization; no aggregate/patient read."""
+        with self.engine.connect() as conn:
+            row = conn.execute(select(sessions.c.session_id, sessions.c.document_id, sessions.c.form_id)
+                               .where(sessions.c.session_id == session_id)).one_or_none()
+            if row is None:
+                raise ReviewPersistenceError("REVIEW_SESSION_NOT_FOUND")
+            return ReviewResourceScope(*row)
 
     @_safe
     def get(self, session_id: str) -> ReviewSession:
