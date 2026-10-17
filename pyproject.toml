@@ -9,6 +9,9 @@ description = "Evaluation and backend foundation for the Central Virology Labora
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
+    "SQLAlchemy>=2.0.55,<2.1",
+    "psycopg[binary]>=3.3.6,<4",
+    "alembic>=1.20,<2",
     "fastapi>=0.115,<0.116",
     "google-genai>=1.75,<2",
     "jsonschema>=4.23,<5",
@@ -37,3 +40,4 @@ evaluation = [
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+markers = ["postgresql: requires an explicitly authorized disposable PostgreSQL test database"]

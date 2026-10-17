@@ -188,3 +188,66 @@ If dependency installation fails because of network access, retry from an enviro
 If `pytest` is not found, activate `.venv` and rerun `python -m pip install -e ".[dev]"`.
 
 If `uvicorn` is not found, activate `.venv` and rerun `python -m pip install -e ".[dev]"`.
+
+## Internal review persistence (Task 10H)
+
+This PostgreSQL slice is available only to explicit internal callers. It is not
+connected to API routes/startup, authentication, OCR/providers or Excel. The existing
+pure workflow remains authoritative for decision rules; approved OCR values never
+overwrite canonical extraction. See [persistence design](docs/review_persistence_design.md).
+
+Validated on Python 3.14.2/Windows with SQLAlchemy 2.0.55, psycopg and psycopg-binary
+3.3.6, and Alembic 1.20.0. Added transitive versions: greenlet 3.5.6, Mako 1.4.3,
+MarkupSafe 3.0.4 and tzdata 2026.5. No unrelated packages were upgraded. Pytest's
+existing facilities suffice; no new integration-test framework or SQLite fallback.
+
+Construct an engine explicitly via `create_review_engine(dsn)`, then a repository
+and `ReviewPersistenceService`. These objects do not connect at import time. Supply
+trusted document/form-scoped context from authenticated runtime when it eventually
+exists; constructing `TrustedReviewContext` itself does not authenticate a person.
+The database role should have only required permissions; separate migration/admin
+credentials from application credentials in deployment. Schema triggers also reject
+event/item mutations, immutable preparation changes and ordinary session deletion.
+
+Migration requires a separately supplied PostgreSQL DSN; nothing reads `.env`
+automatically or changes existing application configuration:
+
+```powershell
+# Set locally; never paste credentials into chat or commit them.
+$env:REVIEW_DATABASE_DSN = '<explicit PostgreSQL DSN>'
+.\.venv\Scripts\python.exe -B -m alembic -c alembic.ini upgrade head
+```
+
+Migration `0001_review_persistence` creates only the three review tables, constraints,
+index and audit guards (plus Alembic's version table). It contains static DDL,
+independent of future model edits. Downgrade deliberately refuses audit deletion;
+production deletion/recovery needs a separately approved lifecycle procedure.
+
+### Isolated PostgreSQL tests
+
+Use a disposable local PostgreSQL instance/database. For example, start a dedicated
+container from `postgres:16-alpine` with a locally generated password, database
+`review_test_lab`, and a port bound only to `127.0.0.1`. Do not reuse an application
+database. Supply its DSN only through the environment:
+
+```powershell
+$env:REVIEW_TEST_DSN = '<local PostgreSQL DSN for review_test_lab>'
+$env:REVIEW_TEST_ALLOW_DISPOSABLE = 'yes'
+.\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider tests/integration
+.\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
+```
+
+The harness requires loopback host, database matching `review_test_[a-z0-9_]+`,
+PostgreSQL DSN with no extra query options, and explicit disposable acknowledgement.
+Each test creates/migrates a unique `review_test_<random>` schema, then drops ONLY
+that generated schema. It never drops/resets a database. The test role must own
+this dedicated test database/schema and may create functions/triggers. Without a
+test DSN, PostgreSQL tests skip explicitly; those skips are not DB validation.
+An unsafe configured DSN fails rather than silently skipping or connecting.
+
+Ordinary unit tests need no DB. For a complete persistence validation, use the
+configured integration/full-suite commands above. Repository errors hide SQL
+parameters; never enable SQL debug logging or log DSNs, snapshots or decision text.
+Private source files are not stored as image/PDF bytes in these tables. Stable
+runtime artifact storage, authentication, retention policy and explicit re-review
+supersession remain separate work; the current one-decision gate is unchanged.
