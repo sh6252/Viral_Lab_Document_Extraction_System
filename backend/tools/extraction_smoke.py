@@ -12,6 +12,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass, replace
+from html import escape
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -127,32 +128,55 @@ def create_synthetic_fixture(
 
 
 def build_synthetic_pdf_bytes() -> bytes:
-    lines = [
-        "Central Virology Laboratory - Synthetic commitment form",
-        "\u05d8\u05d5\u05e4\u05e1 \u05d4\u05ea\u05d7\u05d9\u05d9\u05d1\u05d5\u05ea \u05e1\u05d9\u05e0\u05ea\u05d8\u05d9",
-        f"\u05e9\u05dd \u05e4\u05e8\u05d8\u05d9: {SYNTHETIC_VALUES['first_name']}",
-        f"\u05e9\u05dd \u05de\u05e9\u05e4\u05d7\u05d4: {SYNTHETIC_VALUES['last_name']}",
-        f"\u05ea\u05e2\u05d5\u05d3\u05ea \u05d6\u05d4\u05d5\u05ea: {SYNTHETIC_VALUES['israeli_id']}",
-        "\u05de\u05e1\u05e4\u05e8\u05d9 \u05de\u05e2\u05d1\u05d3\u05d4: "
-        + ", ".join(SYNTHETIC_VALUES["central_numbers"]),
-        f"\u05d4\u05ea\u05e7\u05d1\u05dc: {SYNTHETIC_VALUES['sample_receipt_date']}",
-        f"\u05d2\u05d5\u05e8\u05dd \u05e9\u05d5\u05dc\u05d7: {SYNTHETIC_VALUES['sender']}",
-        "\u05de\u05e1\u05e4\u05e8\u05d9 \u05d4\u05ea\u05d7\u05d9\u05d9\u05d1\u05d5\u05ea: "
-        + ", ".join(SYNTHETIC_VALUES["commitment_numbers"]),
-        "Synthetic data only - no real patient record.",
-    ]
-    stream = _pdf_text_stream(lines)
-    objects = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
-            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
-        ),
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
-    ]
-    return _assemble_pdf(objects)
+    """Render synthetic values with MuPDF's bundled Noto Hebrew font and bidi shaping.
+
+    PyMuPDF is optional tooling, loaded only when generating a PDF. Its HTML
+    renderer embeds fallback fonts locally; no OS font path or download is used.
+    Separate RTL labels/values from LTR identifiers to avoid reversing digits.
+    """
+    import pymupdf
+
+    labels = {
+        "first_name": "שם פרטי",
+        "last_name": "שם משפחה",
+        "israeli_id": "תעודת זהות",
+        "central_numbers": "מספרי מעבדה",
+        "sample_receipt_date": "התקבל",
+        "sender": "גורם שולח",
+        "commitment_numbers": "מספרי התחייבות",
+    }
+    rows = []
+    for name, label in labels.items():
+        value = SYNTHETIC_VALUES[name]
+        values = value if isinstance(value, list) else [value]
+        direction = "rtl" if name in {"first_name", "last_name", "sender"} else "ltr"
+        content = "<br>".join(escape(item) for item in values)
+        rows.append(
+            f'<tr><td dir="{direction}">{content}</td>'
+            f'<td dir="rtl">{escape(label)}</td></tr>'
+        )
+    html = (
+        '<h1 dir="rtl">טופס התחייבות סינתטי</h1>'
+        '<p class="notice">Synthetic data only - no real patient record.</p>'
+        '<table>' + "".join(rows) + '</table>'
+        '<p class="notice">Central Virology Laboratory - Synthetic commitment form</p>'
+    )
+    css = """
+        body { font-family: serif; font-size: 18pt; }
+        h1 { text-align: right; font-size: 25pt; }
+        table { width: 100%; border-collapse: collapse; }
+        td { padding: 12pt; border-bottom: 1px solid #bbb; width: 50%; }
+        .notice { font-size: 11pt; text-align: center; }
+    """
+    with pymupdf.open() as document:
+        page = document.new_page(width=595, height=842)
+        spare_height, scale = page.insert_htmlbox(
+            pymupdf.Rect(36, 36, 559, 806), html, css=css, scale_low=1,
+        )
+        if spare_height < 0 or scale != 1:
+            raise ValueError("Synthetic form does not fit on one readable page")
+        document.subset_fonts()
+        return document.tobytes(garbage=4, deflate=True)
 
 
 def build_synthetic_ground_truth(*, filename: str, sha256: str) -> dict[str, Any]:
@@ -266,6 +290,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.synthetic_pdf_output:
+        if args.create_synthetic_fixture:
+            parser.error("Choose PDF-only output or fixture creation, not both")
+        # Exclusive creation: never overwrite the frozen PDF or ground truth.
+        pdf_bytes = build_synthetic_pdf_bytes()
+        with args.synthetic_pdf_output.open("xb") as output:
+            output.write(pdf_bytes)
+        print(json.dumps({"pdf": str(args.synthetic_pdf_output)}, indent=2))
+        return 0
+
     if args.create_synthetic_fixture:
         pdf_path, truth_path = create_synthetic_fixture()
         print(json.dumps({"pdf": str(pdf_path), "ground_truth": str(truth_path)}, indent=2))
@@ -302,6 +336,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--redact", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--create-synthetic-fixture", action="store_true")
+    parser.add_argument(
+        "--synthetic-pdf-output", type=Path,
+        help="Create a new readable synthetic PDF only; parent must exist; never overwrite.",
+    )
     return parser
 
 
@@ -513,43 +551,6 @@ def _truth_present_many(values: list[str]) -> dict[str, Any]:
         "values": [{"raw": value} for value in values],
         "evidence": [{"page_index": 0, "source_kind": "manual_review"}],
     }
-
-
-def _pdf_text_stream(lines: list[str]) -> bytes:
-    commands = ["BT", "/F1 14 Tf", "72 780 Td", "18 TL"]
-    for index, line in enumerate(lines):
-        if index:
-            commands.append("T*")
-        commands.append(f"{_pdf_hex_string(line)} Tj")
-    commands.append("ET")
-    return "\n".join(commands).encode("ascii")
-
-
-def _pdf_hex_string(text: str) -> str:
-    return "<FEFF" + text.encode("utf-16-be").hex().upper() + ">"
-
-
-def _assemble_pdf(objects: list[bytes]) -> bytes:
-    output = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for index, obj in enumerate(objects, start=1):
-        offsets.append(len(output))
-        output.extend(f"{index} 0 obj\n".encode("ascii"))
-        output.extend(obj)
-        output.extend(b"\nendobj\n")
-
-    xref_offset = len(output)
-    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
-    output.extend(b"0000000000 65535 f \n")
-    for offset in offsets[1:]:
-        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
-    output.extend(
-        (
-            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
-            f"startxref\n{xref_offset}\n%%EOF\n"
-        ).encode("ascii")
-    )
-    return bytes(output)
 
 
 if __name__ == "__main__":
