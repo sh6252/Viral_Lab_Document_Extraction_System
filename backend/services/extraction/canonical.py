@@ -73,8 +73,13 @@ def sanitize_fields(
             "approved_as_extracted",
             "approved_corrected",
             "corrected",
+            "rejected",
+            "acknowledged_blank",
         }:
-            raise InvalidProviderResponse("AI provider is not allowed to approve or correct fields.")
-        review_status = "unreviewed" if field_result.value_status == "present" else "needs_review"
+            raise InvalidProviderResponse("AI provider is not allowed to make terminal review decisions.")
+        # Warnings are candidate metadata, never a human approval or disposition.
+        review_status = field_result.review_status
+        if review_status not in {"needs_review", "needs_clarification"}:
+            review_status = "unreviewed" if field_result.value_status == "present" else "needs_review"
         sanitized[field_name] = field_result.model_copy(update={"review_status": review_status})
     return ExtractionFields(**sanitized)

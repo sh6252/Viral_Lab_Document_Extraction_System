@@ -4,6 +4,8 @@ from copy import deepcopy
 
 import pytest
 
+from backend.domain import ExtractionFields, FieldResult
+from backend.services.extraction.canonical import sanitize_fields
 from backend.services.extraction.errors import InvalidProviderResponse
 from backend.services.extraction.gemini_adapter import GeminiExtractionAdapter
 from backend.tools.extraction_smoke import SYNTHETIC_GROUND_TRUTH_PATH, load_json
@@ -21,12 +23,49 @@ def adapter_for(provider, payload):
 
 
 @pytest.mark.parametrize("provider", ["gemini"])
-@pytest.mark.parametrize("review_status", ["approved_as_extracted", "approved_corrected", "corrected"])
-def test_provider_cannot_approve_or_correct(provider, review_status):
+@pytest.mark.parametrize("review_status", [
+    "approved_as_extracted", "approved_corrected", "corrected", "rejected", "acknowledged_blank", "finalized",
+])
+def test_provider_cannot_supply_terminal_review_decisions(provider, review_status):
     payload = _provider_payload()
     payload["logical_forms"][0]["fields"]["israeli_id"]["review_status"] = review_status
     with pytest.raises(InvalidProviderResponse):
         adapter_for(provider, payload).extract(_request(), _document())
+
+
+@pytest.mark.parametrize("warning", ["needs_review", "needs_clarification"])
+@pytest.mark.parametrize("status", ["present", "missing", "unreadable", "ambiguous", "not_processed"])
+def test_provider_warnings_preserve_all_candidate_metadata_without_mutation(warning, status):
+    value = FieldResult(
+        value_status=status,
+        values=[{"raw": "0007", "normalized": "0007"}, {"raw": "0007"}, {"raw": " 008/9)"}]
+        if status == "present" else [],
+        review_status=warning,
+        notes="Synthetic identifier role requires inspection",
+        signals={"confidence": 0.99, "uncertain_role": True},
+        evidence=[{"page_index": 0, "source_kind": "sticker", "text_snippet": "Synthetic only",
+                   "bounding_box": {"x": 10, "y": 20, "width": 30, "height": 40}}],
+    )
+    fields = ExtractionFields(central_numbers=value)
+    before = fields.model_dump(mode="json")
+    result = sanitize_fields(fields, ["central_numbers"])
+    assert result.central_numbers.review_status == warning
+    assert result.central_numbers.model_dump(mode="json") == before["central_numbers"]
+    assert fields.model_dump(mode="json") == before
+
+
+@pytest.mark.parametrize("warning", ["omitted", None, "unreviewed"])
+@pytest.mark.parametrize("status", ["present", "missing", "unreadable", "ambiguous", "not_processed"])
+def test_without_provider_warning_existing_defaults_are_unchanged(warning, status):
+    payload = _provider_payload()
+    candidate = {"value_status": status, "values": [{"raw": "000001"}] if status == "present" else []}
+    if warning != "omitted":
+        candidate["review_status"] = warning
+    payload["logical_forms"][0]["fields"]["central_numbers"] = candidate
+    result = adapter_for("gemini", payload).extract(_request(), _document())
+    field = result.logical_forms[0].fields.central_numbers
+    assert field.review_status == ("unreviewed" if status == "present" else "needs_review")
+    assert [v.raw for v in field.values] == (["000001"] if status == "present" else [])
 
 
 @pytest.mark.parametrize("provider", ["gemini"])

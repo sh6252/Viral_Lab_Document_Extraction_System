@@ -21,6 +21,17 @@ adapter remains available for synthetic evaluation.
   Future adapters must follow the same contract and policy tests.
 - `prompts.py`: shared extraction instructions and the current provider wrapper.
 
+Canonicalization preserves provider `needs_review` and `needs_clarification`
+warnings for present and non-present fields. Without a warning, present values
+default to `unreviewed` and non-present values to `needs_review`. Providers cannot
+make terminal review decisions: approval, correction, rejection and acknowledged
+blank states are rejected. Business values, notes, evidence and signals remain
+unchanged; confidence signals never approve a field. The baseline's
+`review_required_fields` includes present fields carrying either warning.
+
+This is a review-safety rule, independent of prompt accuracy. Previously saved
+canonical results cannot recover provider warnings that were already discarded.
+
 Select Gemini through `DEFAULT_EXTRACTION_ADAPTER=gemini`, with `GEMINI_API_KEY`
 and `GEMINI_MODEL`. The repository default remains `local_ocr` and external access
 is disabled until the server policy and request authorization explicitly allow it.

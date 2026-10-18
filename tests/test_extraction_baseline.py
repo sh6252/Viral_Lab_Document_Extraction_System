@@ -15,7 +15,7 @@ from backend.tools import extraction_baseline as baseline
 from evaluation.scoring import score_extraction
 from tests.test_extraction_api import FakeExtractionAdapter
 from tests.test_gemini_adapter import _document, _provider_payload, _request
-from tests.test_gemini_adapter import _FakeClient, _StatusError
+from tests.test_gemini_adapter import _FakeClient, _FakeResponse, _StatusError
 from tests.test_gemini_adapter import _authorized_config
 from tests.test_scoring import extraction, field, ground_truth, result_field
 
@@ -141,6 +141,36 @@ def test_full_run_checkpoints_exact_output_and_refuses_overwrite(tmp_path, monke
     with pytest.raises(ValueError, match="preserve the previous run"):
         baseline.run_baseline(manifest_path, output, provider="gemini", authorize=True)
     factory.assert_called_once()
+
+
+@pytest.mark.parametrize("warning", ["needs_review", "needs_clarification"])
+def test_present_provider_warnings_enter_review_required_fields_without_changing_scores(tmp_path, monkeypatch, warning):
+    manifest = prepared_manifest(tmp_path, monkeypatch)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    payload = _provider_payload()
+    payload["logical_forms"][0]["fields"]["central_numbers"]["review_status"] = warning
+    original = deepcopy(payload)
+    client = _FakeClient(_FakeResponse(payload))
+    monkeypatch.setattr(baseline.AppConfig, "from_env", authorized_config)
+    report = baseline.run_baseline(
+        manifest_path, tmp_path / "run.json", provider="gemini", authorize=True,
+        adapter_factory=lambda config: GeminiExtractionAdapter(config=config, client_factory=lambda *_: client),
+    )
+    record = report["documents"][0]
+    result = record["extraction_result"]
+    central = result["logical_forms"][0]["fields"]["central_numbers"]
+    assert central["value_status"] == "present" and central["review_status"] == warning
+    assert central["values"] == original["logical_forms"][0]["fields"]["central_numbers"]["values"]
+    assert {"form_id": "form-001", "field": "central_numbers"} in record["review_required_fields"]
+    assert json.loads((tmp_path / "run.json").read_text(encoding="utf-8")) == report
+    assert len(client.calls) == 1 and payload == original
+    # Compare against the former canonical review default, keeping values identical.
+    previous_view = deepcopy(result)
+    previous_view["logical_forms"][0]["fields"]["central_numbers"]["review_status"] = "unreviewed"
+    entry, truth, _ = baseline.prepare_entries(manifest)[0]
+    _, previous_score = baseline.score_fixture(entry, truth, previous_view)
+    assert record["scoring"] == previous_score
 
 
 def test_failed_run_keeps_failure_separate_and_in_end_to_end_denominator(tmp_path, monkeypatch):
