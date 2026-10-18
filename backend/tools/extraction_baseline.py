@@ -267,6 +267,67 @@ def summarize_scores(scores: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def summarize_evaluation(
+    prepared: list[tuple[dict[str, Any], dict[str, Any], bytes]],
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Add annotation coverage, availability and difficulty without changing scoring.
+
+    Accuracy is conditional on scored results. End-to-end yield includes failures
+    in the selected-field denominator, but stays undefined until all are attempted.
+    Provider success counts new attempts only; reused results are reported apart.
+    """
+    selected = {entry["fixture_id"] for entry, _, _ in prepared}
+    record_ids = [record["fixture_id"] for record in records]
+    if len(record_ids) != len(set(record_ids)) or set(record_ids) - selected:
+        raise ValueError("Conflicting evaluation record identifiers.")
+
+    def group(entries: list[tuple[dict[str, Any], dict[str, Any], bytes]]) -> dict[str, Any]:
+        ids = {entry["fixture_id"] for entry, _, _ in entries}
+        observed = [record for record in records if record["fixture_id"] in ids]
+        scores = [r["scoring"] for r in observed if r.get("scoring") is not None]
+        result = summarize_scores(scores)
+        categories = ("verified_present", "verified_absent", "uncertain", "unreadable", "other_excluded")
+        by_field = {name: dict.fromkeys(categories, 0) for name in REQUIRED_FIELDS}
+        for _, truth, _ in entries:
+            for form in truth["logical_forms"]:
+                for name in REQUIRED_FIELDS:
+                    field = form["fields"][name]
+                    status, annotation = field["value_status"], field["annotation_status"]
+                    category = ("verified_present" if annotation == "verified" and status == "present" else
+                                "verified_absent" if annotation == "verified" and status == "absent" else
+                                "uncertain" if annotation == "unverified" and status == "ambiguous" else
+                                "unreadable" if status == "unreadable" else "other_excluded")
+                    by_field[name][category] += 1
+        annotations = {key: sum(field[key] for field in by_field.values()) for key in categories}
+        annotations["excluded_fields"] = sum(annotations[key] for key in ("uncertain", "unreadable", "other_excluded"))
+        selected_fields = sum(score_extraction(truth, {})["overall"]["evaluated_fields"] for _, truth, _ in entries)
+        fresh = [record for record in observed if not record.get("reused", False)]
+        provider_succeeded = sum(r["status"] == "succeeded" for r in fresh)
+        result.update(
+            selected_documents=len(entries), attempted_documents=len(observed),
+            successful_documents=sum(r["status"] == "succeeded" for r in observed),
+            failed_documents=sum(r["status"] == "failed" for r in observed),
+            unattempted_documents=len(entries) - len(observed),
+            reused_documents=len(observed) - len(fresh), provider_attempted_documents=len(fresh),
+            provider_success_rate=provider_succeeded / len(fresh) if fresh else None,
+            identity_structure_failures=sum(r.get("measurement_status") == "identity_structure_failure" for r in observed),
+            selected_scorable_fields=selected_fields,
+            end_to_end_exact_match_rate=(result["overall"]["exact_matches"] / selected_fields
+                                        if selected_fields and len(observed) == len(entries) else None),
+            annotations=annotations, annotations_by_field=by_field,
+        )
+        return result
+
+    summary = group(prepared)
+    difficulties = sorted({entry.get("difficulty", "unspecified") for entry, _, _ in prepared})
+    summary["by_difficulty"] = {
+        difficulty: group([item for item in prepared if item[0].get("difficulty", "unspecified") == difficulty])
+        for difficulty in difficulties
+    }
+    return summary
+
+
 def run_baseline(
     manifest_path: Path, output_path: Path, *, provider: str, authorize: bool,
     adapter_factory: Callable[[AppConfig], ExtractionAdapter | None] | None = None,
@@ -314,7 +375,6 @@ def run_baseline(
         "measurement_version": "task7-association-transient-v1",
         "resume_from": str(resume_from) if resume_from else None,
     }
-    scores = []
     selected_scorable_fields = sum(
         score_extraction(truth, {})["overall"]["evaluated_fields"] for _, truth, _ in prepared
     )
@@ -343,8 +403,6 @@ def run_baseline(
             record["provider_form_id"] = association["provider_form_id"]
             record["scoring_logical_form_id"] = association["scoring_logical_form_id"]
             record["measurement_status"] = association["status"]
-        if record["scoring"] is not None:
-            scores.append(record["scoring"])
         record["review_required_fields"] = [
             {"form_id": form["form_id"], "field": name}
             for form in (payload or {}).get("logical_forms", [])
@@ -353,7 +411,7 @@ def run_baseline(
             or form["fields"].get(name, {}).get("review_status") in {"needs_review", "needs_clarification"}
         ]
         report["documents"].append(record)
-        report["summary"] = summarize_scores(scores)
+        report["summary"] = summarize_evaluation(prepared, report["documents"])
         report["summary"].update(
             selected_documents=len(prepared), attempted_documents=len(report["documents"]),
             failed_documents=sum(item["status"] == "failed" for item in report["documents"]),

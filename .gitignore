@@ -42,6 +42,7 @@ medical_documents/
 patient_documents/
 
 # Generated exports and evaluation artifacts
+evaluation/benchmark/
 exports/
 generated_exports/
 evaluation/artifacts/
