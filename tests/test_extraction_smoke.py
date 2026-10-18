@@ -65,7 +65,7 @@ class ExtractionSmokeTests(unittest.TestCase):
             ))
         self.assertEqual(factory.call_args.args[0].default_extraction_adapter, "gemini")
         self.assertEqual(report["extraction_status"], "succeeded")
-        self.assertEqual(report["prompt_version"], "he-commitment-v1")
+        self.assertEqual(report["prompt_version"], "he-commitment-v2-identifiers")
         self.assertTrue(report["pipeline_version"])
         request = _build_request(
             options=SmokeRunOptions(provider="gemini", authorize_external_processing=True),

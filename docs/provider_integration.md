@@ -52,9 +52,17 @@ HTTP contracts and registry selection. Shared contract tests remain in
 `tests/test_provider_contracts.py`; registry extension uses a synthetic provider.
 These tests do not establish live model accuracy.
 
-The active shared prompt is `he-commitment-v1`. Task 8C temporarily tested v2,
-which did not improve measured name accuracy; v1 was restored. See
-`task8c_prompt_experiment.md` for preserved experiment results and closure.
+The active shared prompt is `he-commitment-v2-identifiers`. It distinguishes
+laboratory sample/accession identifiers from financial commitment/authorization
+identifiers using labels and context, preserves supported multiple values, and
+requests ambiguous empty fields with notes when the role cannot be established.
+The JSON contract and other field instructions remain unchanged. Offline tests
+verify the prompt contract; extraction accuracy requires a separately authorized
+comparison against the preserved v1 baseline in a new output directory, using
+the same documents, ground truth, model, pipeline, and runtime settings.
+Task 8C's earlier `he-commitment-v2` name experiment did not improve measured name
+accuracy and was reverted to v1. It is separate from this identifier-only change;
+see `task8c_prompt_experiment.md` for preserved results and closure.
 Task 7's measurement harness
 preserves canonical output, records model/prompt/pipeline versions, validates frozen
 inputs and separately associates single-form/single-page fixtures for scoring.
