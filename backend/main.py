@@ -8,6 +8,7 @@ from backend.api.routes.reviews import router as reviews_router
 from backend.core.config import AppConfig
 from backend.core.review_access import Authenticator, AuthorizationPolicy
 from backend.services.review_api import ReviewAPIService
+from backend.services.demo_workflow import DemoWorkflow
 from backend.services.extraction.base import ExtractionAdapter
 from backend.services.extraction.registry import build_extraction_adapter
 
@@ -18,6 +19,7 @@ def create_app(
     *, review_api_service: ReviewAPIService | None = None,
     review_authenticator: Authenticator | None = None,
     review_authorization_policy: AuthorizationPolicy | None = None,
+    demo_workflow: DemoWorkflow | None = None,
 ) -> FastAPI:
     """Create the FastAPI application without external side effects."""
 
@@ -38,6 +40,11 @@ def create_app(
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(extractions_router, prefix="/api/v1")
     app.include_router(reviews_router, prefix="/api/v1")
+    if demo_workflow is not None:
+        from backend.api.routes.demo import router as demo_router
+
+        app.state.demo_workflow = demo_workflow
+        app.include_router(demo_router, prefix="/api/v1")
     return app
 
 

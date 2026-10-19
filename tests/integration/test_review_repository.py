@@ -38,7 +38,8 @@ def apply(repository, session, *, index=0, revision=None, **changes):
 
 def test_migration_upgrade_and_constraints_exist(pg_engine):
     inspector = inspect(pg_engine)
-    assert set(inspector.get_table_names()) == {"alembic_version", "review_sessions", "review_items", "review_events"}
+    assert set(inspector.get_table_names()) == {"alembic_version", "review_sessions", "review_items", "review_events",
+                                               "business_documents", "business_records", "business_review_events"}
     assert {c["name"] for c in inspector.get_unique_constraints("review_events")} >= {
         "uq_review_event_revision", "uq_review_event_candidate",
     }
