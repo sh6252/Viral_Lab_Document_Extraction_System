@@ -27,6 +27,7 @@ from backend.services.extraction.errors import (
     ProviderUnavailable,
     UnsupportedDocumentType,
 )
+from backend.services.extraction.gemini_schema import build_gemini_response_schema
 from backend.services.extraction.policy import ProviderPolicy
 from backend.services.extraction.provider_errors import (
     is_transport_error,
@@ -121,6 +122,8 @@ class GeminiExtractionAdapter(ExtractionAdapter):
             response_mime_type="application/json",
             temperature=0,
         )
+        if self._config.gemini_structured_outputs_experimental:
+            config.response_json_schema = build_gemini_response_schema()
         return client.models.generate_content(
             model=self._config.gemini_model,
             contents=[part, prompt],
