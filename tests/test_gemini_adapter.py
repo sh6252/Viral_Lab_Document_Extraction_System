@@ -1,6 +1,11 @@
 import json
 import unittest
+from base64 import urlsafe_b64decode
+from dataclasses import replace
+import socket
 
+import httpx
+import pytest
 from jsonschema import Draft202012Validator
 
 from backend.core.config import AppConfig
@@ -24,6 +29,7 @@ from backend.services.extraction.errors import (
     UnsupportedDocumentType,
 )
 from tests.test_domain_models import EXTRACTION_SCHEMA
+from backend.services.extraction.gemini_schema import build_gemini_response_schema
 
 
 class _FakeResponse:
@@ -506,6 +512,59 @@ class GeminiExtractionAdapterTests(unittest.TestCase):
             },
         )
         self.assertNotIn("SECRET_TEST_KEY", str(context.exception))
+
+
+@pytest.mark.parametrize("mime,content", [
+    ("application/pdf", b"%PDF-1.7 synthetic SDK fixture"),
+    ("image/png", b"\x89PNG\r\n\x1a\nsynthetic SDK fixture"),
+    ("image/jpeg", b"\xff\xd8\xffsynthetic SDK fixture"),
+], ids=["pdf", "png", "jpeg"])
+@pytest.mark.parametrize("structured", [False, True], ids=["json-mode", "json-schema"])
+def test_gemini_38_installed_sdk_serializes_documents_and_parses_canonical_output(monkeypatch, mime, content, structured):
+    """Exercise the installed SDK HTTP conversion with transport blocked offline."""
+    from google import genai
+    from google.genai import types
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("SDK compatibility tests must never open a network connection")
+
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(socket, "getaddrinfo", forbidden)
+    calls = []
+
+    def respond(request):
+        assert request.method == "POST"
+        assert request.url.path.endswith("/models/gemini-3.8-flash:generateContent")
+        body = json.loads(request.content)
+        inline = body["contents"][0]["parts"][0]["inlineData"]
+        assert inline["mimeType"] == mime and urlsafe_b64decode(inline["data"]) == content
+        generation = body["generationConfig"]
+        assert generation["responseMimeType"] == "application/json"
+        if structured:
+            assert generation["responseJsonSchema"] == build_gemini_response_schema()
+        else:
+            assert "responseJsonSchema" not in generation
+        calls.append(body)
+        return httpx.Response(200, json={"candidates": [{"content": {"role": "model", "parts": [
+            {"text": json.dumps(_provider_payload())}]}, "finishReason": "STOP"}]})
+
+    with httpx.Client(transport=httpx.MockTransport(respond), trust_env=False) as transport:
+        with genai.Client(vertexai=False, api_key="synthetic-offline-key", http_options=types.HttpOptions(
+            httpx_client=transport, retry_options=types.HttpRetryOptions(attempts=1))) as client:
+            adapter = GeminiExtractionAdapter(config=replace(_authorized_config(), gemini_model="gemini-3.8-flash",
+                gemini_structured_outputs_experimental=structured), client_factory=lambda *_: client, max_retries=0)
+            result = adapter.extract(_request(), _document(mime, content))
+    assert len(calls) == 1 and result.provider.version == "gemini-3.8-flash"
+    assert result.logical_forms[0].fields.israeli_id.values[0].raw == "001234567"
+    Draft202012Validator(EXTRACTION_SCHEMA).validate(result.model_dump(mode="json", exclude_none=True))
+
+
+def test_gemini_38_model_defaults_and_explicit_environment_override(monkeypatch):
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    assert AppConfig().gemini_model == AppConfig.from_env().gemini_model == "gemini-3.8-flash"
+    monkeypatch.setenv("GEMINI_MODEL", "explicit-test-model")
+    assert AppConfig.from_env().gemini_model == "explicit-test-model"
 
 
 if __name__ == "__main__":

@@ -150,7 +150,7 @@ Render מגדיר את `RENDER_EXTERNAL_URL`; זהו מקור ברירת המח�
   timeout חמש שניות. אין חיבור מתוך הפקודה הזו ל־`viral_lab` המקומי.
 - `DEMO_PASSWORD_HASH`: הפלט של מחולל הסיסמה ב־Backend. לא הסיסמה הגלויה.
 - `GEMINI_API_KEY`: סוד Backend בלבד ב־Render Environment, לעולם לא `VITE_`.
-  לשמור את `GEMINI_MODEL` הקיים; ברירת המחדל בקוד היא `gemini-2.5-flash`.
+  להגדיר `GEMINI_MODEL=gemini-3.8-flash`, בהתאם לברירת המחדל בקוד וב־Blueprint.
 - להסיר את `DEMO_ALLOWED_DOCUMENT_SHA256` הישן מ־Render; הקוד אינו קורא אותו.
   SHA-256 עדיין נשמר לבדיקת שלמות המסמך, ללא הגבלת גישה לרשימת קבצים קבועה.
 
@@ -162,6 +162,35 @@ Render מגדיר את `RENDER_EXTERNAL_URL`; זהו מקור ברירת המח�
 הסכמה מפורשת שאינה מסומנת מראש; ללא הסכמה אין קריאת ספק. אין זיהוי אוטומטי
 שמוכיח שקובץ סינתטי: האחריות לבחירת תוכן סינתטי היא על המשתמש המורשה.
 ברירות המחדל המקומיות ב־`.env.example` נשארות עם AI כבוי.
+
+### Gemini 3.8 Flash ותיאום Blueprint
+
+המזהה המדויק הוא `gemini-3.8-flash`. לפי [תיעוד המודל הרשמי](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash),
+נתמכים PDF, תמונות ופלט מובנה. SDK מקומי: `google-genai==1.75.0`.
+בדיקות ללא רשת מפעילות את ה־SDK האמיתי עם `httpx.MockTransport` עבור PDF,
+PNG ו־JPEG, בודקות את נתיב המודל, MIME וה־bytes שנשלחים, JSON mode וגם
+`response_json_schema`, ופענוח לתוצאה הקנונית. פלט JSON נבדק תמיד מול חוזה
+האפליקציה. `GEMINI_STRUCTURED_OUTPUTS_EXPERIMENTAL` נשאר כבוי כברירת מחדל;
+התמיכה בסכמה נבדקת ללא הפעלת ניסוי זה בענן. לא שונו prompt או כללי ביקורת.
+אימות עדכון המודל: **31 בדיקות מתאם עברו**, כולל שש בדיקות תעבורת SDK;
+בריצת Backend מלאה ללא integration עברו **1,185 בדיקות, ללא כשל או דילוג**.
+גם `pip check` עבר. קובצי Frontend לא שונו בעדכון המודל; בדיקות ובניית
+ה־Frontend מהתיקון הקודם מתועדות בהמשך.
+אין כאן בדיקת זמינות חיה, הרשאות המפתח, מכסה או איכות חילוץ של המודל החדש;
+לא בוצעה השוואת baseline/holdout ולא ניתן לטעון לשימור דיוק ללא הערכה חיה מאושרת.
+
+`render.yaml` מגדיר את ארבעת דגלי Gemini ואת `GEMINI_MODEL` עם `value` מפורש.
+בעת סנכרון הם יגברו על ערכים ידניים סותרים. להזין ידנית את אותם ערכים בלבד.
+מפתח Gemini, DSN ו־password hash נשארים `sync: false`: אין ערכים סודיים בקובץ,
+ובשירות קיים הסנכרון לא יעדכן אותם. ראו [כללי משתני Blueprint](https://render.com/docs/blueprint-spec#setting-environment-variables).
+
+**לפני push ללא פריסה**, בשירות מחובר ל־Blueprint יש להגדיר ב־Settings
+את `Auto Sync = No`. `autoDeployTrigger: off` מכבה פריסת קוד אוטומטית,
+אך אינו מכבה Auto Sync של ה־Blueprint; סנכרון שינוי תצורה יכול להפעיל פריסה.
+ראו [כיבוי סנכרון אוטומטי](https://render.com/docs/infrastructure-as-code#disabling-automatic-sync).
+אין אפשרות לכבות הגדרת Dashboard זו באמצעות `autoDeployTrigger` ב־YAML.
+במשימה זו לא משנים הגדרות Render ולא מפעילים sync/deploy. המשתמש ישלים
+את ההגדרות ואת הפריסה לאחר שהקוד מוכן.
 
 ## Neon ומיגרציה מפורשת
 
@@ -719,7 +748,7 @@ codec, API ו־UI, עם בדיקות תאימות והערכה. היא לא מו
    deployment קודם. לבדוק שמוצע שירות Web אחד Free בלבד וללא Render DB.
 7. למלא `REVIEW_DATABASE_DSN` של runtime ו־`DEMO_PASSWORD_HASH` בשדות הסודיים.
    להוסיף `GEMINI_API_KEY` כסוד ואת ארבעת דגלי Gemini המפורטים למעלה.
-   לשמור את המודל הקיים ולא להעתיק `.env` עסקי. אם בוחרים יצירה ידנית במקום
+   להגדיר `GEMINI_MODEL=gemini-3.8-flash` ולא להעתיק `.env` עסקי. אם בוחרים יצירה ידנית במקום
    Blueprint, להעתיק במדויק root/build/start/health/env המפורטים למעלה.
 8. לבצע deploy ידני מאושר. לבדוק שה־build מתקין Node/Python ושה־service
    עולה על PORT שהוקצה. `/api/v1/ready` צריך להיות 200; אם 503, לבדוק

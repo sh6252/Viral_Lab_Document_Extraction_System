@@ -18,7 +18,7 @@ supported PDF/PNG/JPEG up to 5 MiB, with authentication, CSRF and explicit
 per-file external-processing consent. There is no document SHA-256 allowlist.
 Use synthetic documents only: never upload real patient documents or personal
 medical information. Set the backend-only Gemini secret and four policy flags
-listed in the checklist; keep the existing model configuration. Local AI defaults
+listed in the checklist; set `GEMINI_MODEL=gemini-3.8-flash`. Local AI defaults
 remain disabled. No mock is silently substituted for Gemini, and human review
 remains mandatory. The earlier release/VM reports below are historical.
 
@@ -153,7 +153,7 @@ DEFAULT_EXTRACTION_ADAPTER=local_ocr
 MAX_UPLOAD_BYTES=20971520
 EXTRACTION_PIPELINE_VERSION=api-v1
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 ```
 
 Gemini extraction remains disabled unless `AI_OUTBOUND_ENABLED=true`, `ALLOW_EXTERNAL_PHI=true`, `APPROVED_AI_PROVIDERS` includes `gemini`, the request-level provider policy permits `external_phi`, and `GEMINI_API_KEY` is set. Unit tests use a fake Gemini client and do not make real external AI calls.

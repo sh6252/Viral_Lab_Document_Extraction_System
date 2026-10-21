@@ -38,7 +38,7 @@ class AppConfig:
     approved_ai_providers: tuple[str, ...] = ()
     default_extraction_adapter: str = "local_ocr"
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     max_upload_bytes: int = 20 * 1024 * 1024
     extraction_pipeline_version: str = "api-v1"
     gemini_structured_outputs_experimental: bool = False
@@ -51,7 +51,7 @@ class AppConfig:
             approved_ai_providers=_env_csv("APPROVED_AI_PROVIDERS"),
             default_extraction_adapter=os.getenv("DEFAULT_EXTRACTION_ADAPTER", "local_ocr"),
             gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
             max_upload_bytes=_env_int("MAX_UPLOAD_BYTES", 20 * 1024 * 1024),
             extraction_pipeline_version=os.getenv("EXTRACTION_PIPELINE_VERSION", "api-v1"),
             gemini_structured_outputs_experimental=_env_bool(
