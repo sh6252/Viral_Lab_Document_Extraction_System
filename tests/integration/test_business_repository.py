@@ -99,7 +99,8 @@ def test_two_form_fourteen_decisions_restart_reopen_identical_xlsx_without_provi
         assert sum(len(f["audit"]) for f in audit["forms"]) == 14
         workbook = client.get(f"{BASE}/{run['run_id']}/export.xlsx").content
         sheets = read_workbook(workbook)
-        assert len(sheets["Forms"][1]) == 2 and len(sheets["ReviewAudit"][1]) == 14
+        assert len(sheets["Forms"][1]) == 4 and len(sheets["ReviewAudit"][1]) == 14
+        assert [row["commitment_numbers"] for row in sheets["Forms"][1]] == ["00001", "00002", "00001", "00002"]
     pg_engine.dispose()  # Close connections and recreate the entire ASGI/service/repository stack.
     forbidden = Adapter(error=AssertionError("provider must not run during reopen"))
     fresh, workflow, _ = client_for(pg_engine, forbidden)

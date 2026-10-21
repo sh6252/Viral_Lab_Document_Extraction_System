@@ -1,0 +1,436 @@
+{
+  "schema_version": 1,
+  "base_commit": "01315c9733ae8f9310275fc9d8921de510dae5b7",
+  "release_branch": "release/submission-2026-10-22",
+  "sources": {
+    "backend": {
+      "branch": "feat/durable-business-records",
+      "relative_location": "../.."
+    },
+    "premium": {
+      "branch": "feat/premium-ui-redesign",
+      "relative_location": "../premium-ui-worktree"
+    }
+  },
+  "method": "Clean linked worktree at shared base, byte-identical allowlisted uncommitted overlays; no history rewriting or commits.",
+  "files": [
+    {
+      "path": "README.md",
+      "source": "backend",
+      "sha256": "1d11cedcf2609bc1da32483d83c100ca9aae66601c349a19b0f9928b6de6dca5",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/api/bulk_export_schemas.py",
+      "source": "backend",
+      "sha256": "62d9caf69a3ad63987f8ae52304f72463c409297f13f1ebda450f038f8f8598c",
+      "new_at_source": true
+    },
+    {
+      "path": "backend/api/demo_schemas.py",
+      "source": "backend",
+      "sha256": "b77db945be3ee6af1aa20c28fe01613e8a4c9de1706fa96ffb8749bf5d8c2726",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/api/routes/demo.py",
+      "source": "backend",
+      "sha256": "6db256246c9f4592a6aa9330634822ff25c7de45497e702017ad9ded98ad08bb",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/persistence/business_codec.py",
+      "source": "backend",
+      "sha256": "efc899412641176a02a25ad508c2c4cead6dc743cc0de9f1666fb634ae3994b7",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/persistence/business_models.py",
+      "source": "backend",
+      "sha256": "1f098193088b5f7375b9d49afe5c5775b4b9aed4f97f760c25c5609b5d44acff",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/persistence/business_repository.py",
+      "source": "backend",
+      "sha256": "dc9465288f4c1dcad5f630411bdb1244d230e960940bb4057107c99999af78ad",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/persistence/business_search.py",
+      "source": "backend",
+      "sha256": "6655f1fa92c7a9b5613d692e4583ff817f8a5addadbbf913feb1e71a7e07fc0b",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/services/bulk_export.py",
+      "source": "backend",
+      "sha256": "321df79aa0c2cef4e170f869b62f69b345bbd437e9295814f2804fce1edcf0fd",
+      "new_at_source": true
+    },
+    {
+      "path": "backend/services/business_review.py",
+      "source": "backend",
+      "sha256": "5894e88e0c87ae0c34b12835efb45b29b63f4847668ddf40640e211ab9ff7023",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/services/demo_workflow.py",
+      "source": "backend",
+      "sha256": "a67194c6507492040b63b2211a9341b0e5459294a540007364a0c492923d6dcb",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/services/durable_workflow.py",
+      "source": "backend",
+      "sha256": "8aa1cb075c5c40f4de6c8f516d6cdbe460a476ef0b6eb66cf4c674f49957573c",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/services/excel_export.py",
+      "source": "backend",
+      "sha256": "d2e411fcfe6894d581bb67019d1b2d0b0940b2c7e77890b7c3d5be94622c908d",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/services/extraction/prompts.py",
+      "source": "backend",
+      "sha256": "dea534bc6d1566853a71a834df7691ecf43e731ad40cb2b850816b9db1b46d7b",
+      "new_at_source": false
+    },
+    {
+      "path": "backend/services/form_review_policy.py",
+      "source": "backend",
+      "sha256": "c6ab2a54f240784831d3b70c7a3c2961ada2911e5cefd4d1fe316364030fbe33",
+      "new_at_source": true
+    },
+    {
+      "path": "backend/tools/seed_synthetic_demo.py",
+      "source": "backend",
+      "sha256": "cc09d0401d800e2f1e0e63f87304d5bbf6bbfb6f9688a8a3f674fa4870545faa",
+      "new_at_source": true
+    },
+    {
+      "path": "docs/architecture_decisions.md",
+      "source": "backend",
+      "sha256": "d36a293955cc33cf6951886be11a2feef65fe0fbae7a121c190c798a39498cc2",
+      "new_at_source": false
+    },
+    {
+      "path": "docs/batch_export_and_upload_audit.md",
+      "source": "backend",
+      "sha256": "63cdae3dae845a402ed55540de5928a1024e7ff5a4da72d1e6cdaf2b643bf208",
+      "new_at_source": true
+    },
+    {
+      "path": "docs/business_rules.md",
+      "source": "backend",
+      "sha256": "9be94e459716925140a1ec4578fcda0e71942352517fc4a2eb7aab8b247be89f",
+      "new_at_source": false
+    },
+    {
+      "path": "docs/form_approval.md",
+      "source": "backend",
+      "sha256": "ca0a0d8f3b97372830d5e647527ef0533fb32e35f8a98161fe7430416843eb8f",
+      "new_at_source": true
+    },
+    {
+      "path": "docs/form_approval_backup_verification.md",
+      "source": "backend",
+      "sha256": "54aaf2b255a8891435c8e061ebe8d134603740286dc621a013c11b640fc25c98",
+      "new_at_source": true
+    },
+    {
+      "path": "docs/form_approval_migration_validation.md",
+      "source": "backend",
+      "sha256": "0a1e0daad7be5e7548a76ee2ab06a79c130d69362ed221d0c87a1e451611a548",
+      "new_at_source": true
+    },
+    {
+      "path": "docs/laboratory_commitment_export.md",
+      "source": "backend",
+      "sha256": "44981459e03bfcc986e62809aa8fce7f26fa85f80fcce2b27e46db143a868940",
+      "new_at_source": true
+    },
+    {
+      "path": "docs/mvp_gap_analysis.md",
+      "source": "backend",
+      "sha256": "f179e844dd91b3110b54375a5679b8a31dfa6901e895c040ef31c22870cd877c",
+      "new_at_source": true
+    },
+    {
+      "path": "docs/provider_integration.md",
+      "source": "backend",
+      "sha256": "5563a38398e09ff174e48927318fc789d4c99761aeb05bfab0bc81570e6f5c0d",
+      "new_at_source": false
+    },
+    {
+      "path": "docs/synthetic_demo_seeder.md",
+      "source": "backend",
+      "sha256": "5000ab95debea681be691ddcf4a7e61de3e21de7d2d11755ed26742e6b5ec1f6",
+      "new_at_source": true
+    },
+    {
+      "path": "migrations/versions/0003_form_approval.py",
+      "source": "backend",
+      "sha256": "76a5ab261da86461d53333cb63f504d101d671b1d39be587e50fcd0871e38fc4",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/fixtures/business_review_v1.json",
+      "source": "backend",
+      "sha256": "b6903cc9448c01e9689fbeb48ec01e96ca1bf147230bc5680be49df8d66107f3",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/form_approval_bridge.py",
+      "source": "backend",
+      "sha256": "c87737f9cb0c5e39684afbfa7ab804d2e97517f91be745c71378a820ff1a42b7",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/integration/test_business_records.py",
+      "source": "backend",
+      "sha256": "b30dd6aa199aab5dd0d9f80a01f9c79853e8f8ef9e710703a6b4d0c2883f3b4a",
+      "new_at_source": false
+    },
+    {
+      "path": "tests/integration/test_business_repository.py",
+      "source": "backend",
+      "sha256": "9276919885ceb4e269cb0b177dd06e578e1acfa4ecada1d254ad397979e5fa60",
+      "new_at_source": false
+    },
+    {
+      "path": "tests/integration/test_form_approval.py",
+      "source": "backend",
+      "sha256": "41cbb2a3116d0cc2fc93159b293dee93adbf59886bbee2d40f5a0fd1ced847c5",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/integration/test_form_approval_migration.py",
+      "source": "backend",
+      "sha256": "c197be17a5eff4c134e7f2a3f0cb7c539d5066e45895b4f4413f65c2820eeac4",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/test_bulk_export.py",
+      "source": "backend",
+      "sha256": "879ad6a24ef61e9c677631d0ce461326aa7f418dac061a1bb353cceb2207862b",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/test_commitment_export_compatibility.py",
+      "source": "backend",
+      "sha256": "b39cbb25cebe31a740300dc5f1dcb43b0f76abcfb82ce0d830427983dbf8b588",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/test_demo_api.py",
+      "source": "backend",
+      "sha256": "add9f52884f50773f25eda424e9c9c425214c417546a10d87e15c87d07d2d1b5",
+      "new_at_source": false
+    },
+    {
+      "path": "tests/test_excel_export.py",
+      "source": "backend",
+      "sha256": "9c71f34dc99d745996b71857521840a5554620957bdfc8e938d2a9968e7e38f2",
+      "new_at_source": false
+    },
+    {
+      "path": "tests/test_extraction_prompts.py",
+      "source": "backend",
+      "sha256": "03f8fe48be513a55791730666751b8e15871d362690254b29f8f539c0823c24a",
+      "new_at_source": false
+    },
+    {
+      "path": "tests/test_extraction_smoke.py",
+      "source": "backend",
+      "sha256": "41323f4ed2024f2a665a65831e692ed174789c56706175567138dd62bea2286d",
+      "new_at_source": false
+    },
+    {
+      "path": "tests/test_form_approval.py",
+      "source": "backend",
+      "sha256": "8fb70545249749f450aa6b9ad9ad001087fe2775479893de451e968fd60debe8",
+      "new_at_source": true
+    },
+    {
+      "path": "tests/test_review_export.py",
+      "source": "backend",
+      "sha256": "61e49ecc6abcc3e7d4e88ca91c83033be8ef70a19a66ebd49dca4b01c38eb19f",
+      "new_at_source": false
+    },
+    {
+      "path": "tests/test_seed_synthetic_demo.py",
+      "source": "backend",
+      "sha256": "012850b3e88808f1944d5633a76a93791883ef6883341865d8a1471ff08d5382",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/BATCH_UX_NOTES.md",
+      "source": "premium",
+      "sha256": "96f8ccc5ee41d79c9591e02f308c35fbc0f67891c80d02baf2c6e3e0dfc721af",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/DESIGN_NOTES.md",
+      "source": "premium",
+      "sha256": "11a22d0b7367007da8400b5ce5dc7d9a06b74430fdae7f3dec4e17769c6e778c",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/FINAL_APPROVAL_UX.md",
+      "source": "premium",
+      "sha256": "fcf7aa34440d90058ea71981ec40b77b3e02866374ef0f181f6d2981f81a4b58",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/index.html",
+      "source": "premium",
+      "sha256": "d9b4f88a6ded6293b7f4fa9aa36a6b0a600d58e4df527d68e20a269e7587fcd2",
+      "new_at_source": false
+    },
+    {
+      "path": "frontend/public/brand.svg",
+      "source": "premium",
+      "sha256": "e1345844a85654c2e23d007f8e92f0b883a171ac676f908ff4aac49a8db7f4a4",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/src/App.tsx",
+      "source": "premium",
+      "sha256": "689fb4cc18f331ed8abc5f361fbbef2e716bb3897d9955ce6329134ecf18a75c",
+      "new_at_source": false
+    },
+    {
+      "path": "frontend/src/api.ts",
+      "source": "premium",
+      "sha256": "17ea1e9c6e48c2e4e6f898fac8ccee0169978259e8b4a0e88bc1153f19fe13cf",
+      "new_at_source": false
+    },
+    {
+      "path": "frontend/src/style.css",
+      "source": "premium",
+      "sha256": "77fa8827a1392240368092b8b7f8f1aa47f40a627a64aa141bde4772f9aca56c",
+      "new_at_source": false
+    },
+    {
+      "path": "frontend/src/workbench.ts",
+      "source": "premium",
+      "sha256": "7295640636fdcf629f0814c50a744824ab7033135f1b2a0b5398363b76e7c89f",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/App.test.ts",
+      "source": "premium",
+      "sha256": "55f80349ba759997e45fb9491708576881de3fbee2c943c66c3706437d4f96ef",
+      "new_at_source": false
+    },
+    {
+      "path": "frontend/tests/Batch.test.ts",
+      "source": "premium",
+      "sha256": "45aab3c4990c7c6af3bcbb25d07528802ba8b7fddd50b4cc7174da2df8d903a3",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/FormApproval.test.ts",
+      "source": "premium",
+      "sha256": "ca03303b4a7ac83763bc6afbe6a418c429e544ff0d90b0534e4532b4bdbcf5dd",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/Premium.test.ts",
+      "source": "premium",
+      "sha256": "fa9300d00afb69bbed90b81466a7467a426b7d4a44ee1fa8eb15833b0a50581e",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/Records.test.ts",
+      "source": "premium",
+      "sha256": "1f2ca46dbe00e308e8f8eabb734d2bd4f9f29660056ce0dca401dd371f1b3fd6",
+      "new_at_source": false
+    },
+    {
+      "path": "frontend/tests/WorkbenchUI.test.ts",
+      "source": "premium",
+      "sha256": "0afd6fd0f58216d6ba47f048b163f4899902e288622c038a4d87e0864b1bc696",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/appHarness.ts",
+      "source": "premium",
+      "sha256": "deb2295020b15e066bb990b6401255953e0c57993b2186ca99562a13690f5e63",
+      "new_at_source": false
+    },
+    {
+      "path": "frontend/tests/browser-smoke.ts",
+      "source": "premium",
+      "sha256": "835927e39b2fb1143d5771e4d0af376dd448f2534c6a8a7e51bfc019e409b550",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/form-approval-e2e.ts",
+      "source": "premium",
+      "sha256": "af5de60ef5c754acb5a3329ea8a4db69847e33f8d3e795af504d1ebdb6737628",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/preview-server.ts",
+      "source": "premium",
+      "sha256": "18acd9a75a25727138f2ef68b86dddc277353d89c2d53e8e6244c0af987b32fc",
+      "new_at_source": true
+    },
+    {
+      "path": "frontend/tests/workbench.test.ts",
+      "source": "premium",
+      "sha256": "3fd09f4c1c5cd56f55db274a6883ee87eefa81637d431822141b255ec6420458",
+      "new_at_source": true
+    }
+  ],
+  "excluded": [
+    ".env* except tracked .env.example",
+    "demo/ (unverified medical PDF and derived records)",
+    "untracked evaluation/fixtures/holdout/*.pdf",
+    "make_commitment1_fixture.py (local real-document fixture builder)",
+    "frontend/tests/mock-e2e.ts (obsolete private benchmark-artifact-dependent script)",
+    "all ignored storage, backups, uploads, databases, node_modules, build and benchmark outputs"
+  ],
+  "release_edits": [
+    {
+      "path": ".gitignore",
+      "reason": "Exclude private demo fixtures and local database/backup/log artifacts.",
+      "sha256": "b1a0ec09f15237de9acf81ccbbdb62680f120dfb1c862d09db4b47b470b5ae2b"
+    },
+    {
+      "path": "README.md",
+      "reason": "Point to the integrated release and document portable commands and worktree limitations.",
+      "sha256": "7cda06ac373d524e3523ebaccbc4aaabc53924c5c2bc243d740ace970a458657"
+    },
+    {
+      "path": "frontend/tests/form-approval-e2e.ts",
+      "reason": "Resolve the backend root within the integrated repository and choose platform-specific venv default.",
+      "sha256": "c98ca5ad91797ea56ab32ac28af845fcd150ccbb003499a4ba0a5822806d634f"
+    },
+    {
+      "path": "scripts/release_snapshot.py",
+      "reason": "Verify frozen source hashes and export a deterministic source-only ZIP without overwriting.",
+      "sha256": "e13e1f4e670b6dfa7730d5a79a1d583d4cafaad7260a513cf27323f3a166e781"
+    },
+    {
+      "path": "tests/test_release_snapshot.py",
+      "reason": "Cover private paths, tamper detection and deterministic/non-overwriting packaging.",
+      "sha256": "f65178397949a3f1d06aeaefc1c8a2e67cca402710ae491504599fc93a9fe2d8"
+    },
+    {
+      "path": "docs/release/DEPLOYMENT_HE.md",
+      "reason": "Actual-code deployment audit and gated private-cloud steps in Hebrew.",
+      "sha256": "8d5a33bd6fb89da10093707d6044e0d1f6fc56bda4adcca97fedec59a0984d35"
+    },
+    {
+      "path": "docs/release/RELEASE_REPORT_HE.md",
+      "reason": "Current integrated validation and limitations in Hebrew.",
+      "sha256": "d71aae6069124b5a066cbc677bb99c1051dede98e91b67945b301f9bc2646b98"
+    }
+  ],
+  "inventory": "docs/release/source-files.json (hashes every submission file except itself, including this manifest)"
+}

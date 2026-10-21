@@ -21,7 +21,7 @@ SNAPSHOT_ENCODING = "canonical-json-v1"
 ActionKind = Literal["approve_as_extracted", "correct_and_approve", "acknowledge_blank",
                      "reject", "leave_unresolved"]
 FieldReviewState = Literal["approved_provider", "approved_corrected", "acknowledged_blank",
-                           "unresolved", "rejected_unresolved", "unreviewed"]
+                           "unresolved", "rejected_unresolved", "unreviewed", "accepted_by_form"]
 
 
 class BusinessReviewError(ValueError):
@@ -190,11 +190,11 @@ class ReviewedField:
     @property
     def value_source(self) -> str:
         return {"approved_provider": "human_approved_provider", "approved_corrected": "human_corrected",
-                "acknowledged_blank": "human_approved_blank"}.get(self.review_status, "none")
+                "acknowledged_blank": "human_approved_blank", "accepted_by_form": "human_form_attestation"}.get(self.review_status, "none")
 
     @property
     def value_status(self) -> str:
-        if self.review_status in {"approved_provider", "approved_corrected"}:
+        if self.review_status in {"approved_provider", "approved_corrected", "accepted_by_form"}:
             return "present"
         if self.review_status == "acknowledged_blank":
             return "blank"
@@ -224,7 +224,7 @@ class ReviewedBusinessRecord:
     @property
     def unresolved_fields(self) -> tuple[str, ...]:
         return tuple(f.field_name for f in self.fields if f.review_status not in
-                     {"approved_provider", "approved_corrected", "acknowledged_blank"})
+                     {"approved_provider", "approved_corrected", "acknowledged_blank", "accepted_by_form"})
 
     @property
     def review_status(self) -> Literal["complete", "unresolved"]:
@@ -249,10 +249,55 @@ class BusinessReviewAuditEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class FormApprovalAction:
+    """One human attestation about all current form values; no field decisions."""
+
+    source_sha256: str
+    extraction_id: str
+    canonical_snapshot_sha256: str
+    form_id: str
+    decision_id: str
+    expected_revision: int
+    operator_declaration: str
+    declared_at: datetime
+    attest_all_values: Literal[True]
+    policy_version: Literal["human-form-attestation-v1"] = "human-form-attestation-v1"
+    action: Literal["finalize_form"] = "finalize_form"
+
+    @property
+    def field_name(self) -> str:
+        return "__form__"
+
+    def __post_init__(self) -> None:
+        _hash(self.source_sha256)
+        _hash(self.canonical_snapshot_sha256)
+        for value in (self.extraction_id, self.form_id, self.decision_id, self.operator_declaration):
+            _text(value)
+        _revision(self.expected_revision)
+        _require(isinstance(self.declared_at, datetime) and self.declared_at.utcoffset() is not None,
+                 "AWARE_DECLARED_TIMESTAMP_REQUIRED")
+        _require(self.attest_all_values is True and self.action == "finalize_form"
+                 and self.policy_version == "human-form-attestation-v1", "EXPLICIT_FORM_ATTESTATION_REQUIRED")
+
+
+@dataclass(frozen=True, slots=True)
+class FormApprovalAuditEntry:
+    action: FormApprovalAction
+    previous_revision: int
+    revision: int
+
+    def __post_init__(self) -> None:
+        _require(isinstance(self.action, FormApprovalAction), "INVALID_FORM_APPROVAL_AUDIT")
+        _revision(self.previous_revision)
+        _revision(self.revision)
+        _require(self.revision == self.previous_revision + 1, "INVALID_REVIEW_AUDIT_REVISION")
+
+
+@dataclass(frozen=True, slots=True)
 class BusinessReviewResult:
     canonical_snapshot_json: str
     record: ReviewedBusinessRecord
-    audit: tuple[BusinessReviewAuditEntry, ...] = ()
+    audit: tuple[BusinessReviewAuditEntry | FormApprovalAuditEntry, ...] = ()
     version: str = REVIEW_VERSION
     snapshot_encoding: str = SNAPSHOT_ENCODING
 
@@ -260,7 +305,11 @@ class BusinessReviewResult:
         _require(isinstance(self.canonical_snapshot_json, str) and isinstance(self.record, ReviewedBusinessRecord)
                  and isinstance(self.audit, (tuple, list)), "INVALID_BUSINESS_REVIEW_RESULT")
         object.__setattr__(self, "audit", tuple(self.audit))
-        _require(all(isinstance(a, BusinessReviewAuditEntry) for a in self.audit), "INVALID_BUSINESS_REVIEW_RESULT")
+        _require(all(isinstance(a, (BusinessReviewAuditEntry, FormApprovalAuditEntry)) for a in self.audit), "INVALID_BUSINESS_REVIEW_RESULT")
+
+    @property
+    def finalized(self) -> bool:
+        return bool(self.audit and isinstance(self.audit[-1], FormApprovalAuditEntry))
 
 
 def _initial(snapshot: ExtractionResult | str, binding: SourceBinding, form_id: str) -> BusinessReviewResult:
@@ -273,13 +322,24 @@ def _initial(snapshot: ExtractionResult | str, binding: SourceBinding, form_id: 
                                result.provider.name, result.provider.version, fields))
 
 
-def _transition(current: BusinessReviewResult, action: BusinessReviewAction) -> BusinessReviewResult:
-    _require(isinstance(action, BusinessReviewAction), "INVALID_REVIEW_ACTION")
+def _transition(current: BusinessReviewResult, action: BusinessReviewAction | FormApprovalAction) -> BusinessReviewResult:
+    _require(isinstance(action, (BusinessReviewAction, FormApprovalAction)), "INVALID_REVIEW_ACTION")
     record, binding = current.record, current.record.binding
     _require((action.source_sha256, action.extraction_id, action.canonical_snapshot_sha256, action.form_id)
              == (binding.source_sha256, binding.extraction_id, binding.canonical_snapshot_sha256, record.form_id),
              "ACTION_SCOPE_MISMATCH")
     _require(action.expected_revision == record.revision, "STALE_REVIEW_REVISION")
+    if isinstance(action, FormApprovalAction):
+        from backend.services.form_review_policy import review_reasons
+
+        _require(not current.finalized, "FORM_ALREADY_FINALIZED")
+        _require(not any(review_reasons(current, f) for f in record.fields), "FORM_HAS_UNRESOLVED_FIELDS")
+        fields = tuple(replace(f, review_status="accepted_by_form",
+                               reviewed_values=tuple(v.raw for v in f.original.values))
+                       if f.review_status == "unreviewed" else f for f in record.fields)
+        entry = FormApprovalAuditEntry(action, record.revision, record.revision + 1)
+        return replace(current, record=replace(record, fields=fields, revision=record.revision + 1),
+                       audit=current.audit + (entry,))
     original = next(f for f in record.fields if f.field_name == action.field_name)
     _require(original.original == action.original, "ORIGINAL_FIELD_MISMATCH")
     values = action.reviewed_values
@@ -326,7 +386,7 @@ def validate_review_result(result: BusinessReviewResult) -> None:
 
 def apply_business_review(
     canonical_snapshot: ExtractionResult | str, source_binding: SourceBinding, form_id: str,
-    actions: Iterable[BusinessReviewAction] = (), expected_revision: int = 0,
+    actions: Iterable[BusinessReviewAction | FormApprovalAction] = (), expected_revision: int = 0,
     *, previous: BusinessReviewResult | None = None,
 ) -> BusinessReviewResult:
     """Atomic local batch; revisions/decision IDs are scoped to exactly one form.
@@ -343,7 +403,7 @@ def apply_business_review(
                  == (initial.canonical_snapshot_json, source_binding, form_id), "PREVIOUS_REVIEW_SCOPE_MISMATCH")
     current = previous if previous is not None else initial
     batch = tuple(actions)
-    _require(all(isinstance(a, BusinessReviewAction) for a in batch), "INVALID_REVIEW_ACTION")
+    _require(all(isinstance(a, (BusinessReviewAction, FormApprovalAction)) for a in batch), "INVALID_REVIEW_ACTION")
     ids = [a.decision_id for a in batch]
     _require(len(ids) == len(set(ids)), "DUPLICATE_DECISION_ID")
     accepted = {entry.action.decision_id: entry.action for entry in current.audit}

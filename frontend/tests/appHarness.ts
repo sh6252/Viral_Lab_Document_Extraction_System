@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import vm from "node:vm";
 import ts from "typescript";
 import * as api from "../src/api.ts";
+import * as workbench from "../src/workbench.ts";
 
 interface Element { type: string; props: Record<string, any> }
 const require = createRequire(import.meta.url);
@@ -54,6 +55,7 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
         useEffect() {}, // Source preview lifecycle is outside these save tests.
       };
       if (name === "./api.ts") return api;
+      if (name === "./workbench.ts") return workbench;
       return require(name);
     },
     FormData, crypto, Date,
@@ -69,12 +71,17 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
     assert.equal(matches.length, 1, "Expected exactly one matching App element");
     return matches[0];
   }
-  function button(label: string) { return one(n => n.type === "button" && text(n) === label); }
+  function button(label: string) { return one(n => n.type === "button" && (text(n) === label || n.props["aria-label"] === label)); }
   function field(name: string) {
-    return one(n => n.type === "fieldset" && elements(n).some(c => c.type === "legend" && text(c) === name));
+    focusField(name);
+    return one(n => n.type === "fieldset" && n.props["data-field"] === name);
+  }
+  function focusField(name: string) {
+    const selector = one(n => n.type === "select" && n.props["aria-label"] === "בחירת שדה לביקורת");
+    if (selector.props.value !== name) change(selector, name);
   }
   function action(name: string) { return one(n => n.type === "select", field(name)); }
-  function reason(name: string) { return one(n => n.type === "input" && !n.props["aria-label"], field(name)); }
+  function reason(name: string) { return one(n => n.type === "input" && n.props["data-review-reason"], field(name)); }
   function change(element: Element, value: string) { element.props.onChange({ target: { value } }); render(); }
   async function click(label: string) {
     const target = button(label); assert.ok(!target.props.disabled, `${label} must be enabled`);
@@ -82,34 +89,54 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
   }
   render();
   return {
-    button, action, reason, click,
+    button, action, reason, click, focusField,
+    check(label: string, checked = true) {
+      one(n => n.type === "input" && n.props["aria-label"] === label).props.onChange({ target: { checked } }); render();
+    },
+    rowActions() { return elements(tree).filter(n => n.type === "button" && n.props["data-row-action"]); },
+    async openApproval(index = 0) {
+      const target = elements(tree).filter(n => n.type === "button" && n.props["data-row-action"])[index];
+      assert.ok(target && !target.props.disabled, "Row action must be enabled");
+      const completion = target.props.onClick({ currentTarget: undefined }); render(); await completion; render();
+    },
     get tree() { return tree; },
+    nodes() { return elements(tree); },
     get download() { return downloaded; },
     get confirmations() { return confirmations; },
     setAllowDiscard(value: boolean) { allowDiscard = value; },
     input(label: string, value: string) {
       change(one(n => ["input", "select"].includes(n.type) && n.props["aria-label"] === label), value);
     },
+    attest(checked = true) {
+      one(n => n.type === "input" && n.props["aria-label"] === "הצהרת אישור לכל ערכי הטופס").props.onChange({ target: { checked } });
+      render();
+    },
+    drop(files: File[]) {
+      one(n => n.type === "div" && typeof n.props.onDrop === "function").props.onDrop({ preventDefault() {}, dataTransfer: { files } });
+      render();
+    },
     async openRecord(index = 0) {
-      const target = elements(tree).filter(n => n.type === "button" && String(n.props["aria-label"] ?? "").startsWith("פתיחת רשומה "))[index];
+      const candidates = elements(tree).filter(n => n.type === "button" && String(n.props["aria-label"] ?? "").startsWith("פתיחת רשומה "));
+      const target = [...new Map(candidates.map(node => [node.props["aria-label"], node])).values()][index];
       assert.ok(target && !target.props.disabled);
       const completion = target.props.onClick(); render(); await completion; render();
     },
     hasPreview() { return elements(tree).some(n => n.type === "iframe" && n.props.src === "blob:synthetic"); },
     operator(value: string) {
-      change(one(n => n.type === "label" && text(n).startsWith("Operator declaration")).props.children[1], value);
+      change(one(n => n.type === "input" && n.props.id === "operator-declaration"), value);
     },
     async upload(file = new File(["%PDF-1.7 synthetic"], "synthetic.pdf", { type: "application/pdf" })) {
       one(n => n.type === "input" && n.props.type === "file").props.onChange({ target: { files: [file] } }); render();
-      assert.ok(button("Upload / Extract").props.disabled, "Consent is mandatory");
-      one(n => n.type === "input" && n.props.type === "checkbox").props.onChange({ target: { checked: true } }); render();
-      await click("Upload / Extract");
+      assert.ok(button("העלאה וחילוץ").props.disabled, "Consent is mandatory");
+      one(n => n.type === "input" && n.props["aria-label"] === "אישור עיבוד חיצוני לכל הקבצים").props.onChange({ target: { checked: true } }); render();
+      await click("העלאה וחילוץ");
     },
     decide(name: string, value: string, why = "Inspected synthetic PDF") {
       change(action(name), value); change(reason(name), why);
     },
     value(name: string, index: number, value: string) {
-      change(one(n => n.type === "input" && n.props["aria-label"] === `${name} value ${index + 1}`), value);
+      focusField(name);
+      change(one(n => n.type === "input" && n.props["data-value-field"] === name && n.props["data-value-index"] === index), value);
     },
     async selectForm(id: string) {
       const target = one(n => n.type === "select" && elements(n).some(c => c.type === "option" && c.props.value === id));

@@ -2,6 +2,52 @@
 
 Central Virology Laboratory document extraction system.
 
+## Render + Neon invited-judge candidate — 21 October 2026
+
+The selected cloud setup now uses **one Render Free Web Service** serving the
+built React app and authenticated FastAPI API at the same HTTPS origin, plus a
+new synthetic-only Neon database. This avoids third-party cookie dependence.
+`render.yaml` prepares the build/start settings; nothing has been committed,
+pushed, migrated to Neon or deployed by this task. See the current
+[Hebrew Render/Neon checklist](docs/release/RENDER_NEON_HE.md).
+The loopback-only launchers retain their original security guards. There is
+still no truthful durable synthetic replay seeder or implemented local OCR;
+uploads in cloud require an explicit synthetic-document SHA-256 allowlist and
+an actually available, separately authorized extraction provider. No mock is
+silently substituted for Gemini. The earlier release/VM reports below are historical.
+
+## Integrated submission candidate — 21 October 2026
+
+This worktree combines the durable backend and premium Hebrew frontend at the
+shared historical base, without committing or changing either source worktree.
+Start with the [Hebrew release report](docs/release/RELEASE_REPORT_HE.md),
+[deployment runbook](docs/release/DEPLOYMENT_HE.md), and
+[integration provenance manifest](docs/release/integration-manifest.json).
+They describe the current submission state; task-by-task notes below and older
+documents retain historical paths and validation counts.
+
+Automatic multi-page PDF splitting is out of scope. Upload multiple separate
+PDF/JPEG/PNG files through the bounded sequential queue. Excel exports one row
+per exact distinct commitment within its logical form; human final approval is
+at form level. The current application is a protected local demo, **not a public
+production service**. External AI stays disabled by default. No real medical
+documents, environment files, database copies or generated build files belong
+in the submission.
+
+From this worktree, use `frontend/` directly; do not run the backend from the old
+premium worktree. The release E2E command is:
+
+```powershell
+$env:BACKEND_TEST_PYTHON = (Resolve-Path .venv/Scripts/python.exe).Path
+node --experimental-strip-types frontend/tests/form-approval-e2e.ts
+```
+
+For source integrity verification and a deterministic source-only ZIP (including
+new source files without staging), see `python scripts/release_snapshot.py --help`.
+The linked worktree shares Git history with the original repository: do not copy
+its `.git` pointer as if it were a standalone clone. Use the source ZIP for file
+submission, or clone the release branch after an explicitly approved commit.
+
 ## Python Development Setup
 
 The project contains evaluation tooling, policy-gated Gemini extraction, canonical contracts, an isolated PostgreSQL OCR-review boundary, a local seven-field review/XLSX tool, and an explicitly enabled local React/FastAPI upload-review-download demo. The original demo remains bounded and non-durable. A separate opt-in [durable PostgreSQL launcher](docs/business_persistence.md) implements business-document, seven-field record and audit persistence with a [saved-records search and reopen screen](docs/records_screen.md). Durable jobs, production authentication and runtime OCR remain unimplemented. Offline tests do not establish live provider availability or extraction accuracy.
@@ -454,7 +500,10 @@ including present ones, rather than assuming a provider value is correct.
 
 Exactly three sheets: **Forms**, **ProcessingFailures**, **ReviewAudit**.
 
-Forms has one row per logical form, with first columns exactly `first_name`,
+Following the laboratory clarification of 2026-10-20, Forms has one row per exact
+distinct reviewed commitment number within each logical form; no reviewed number
+produces one blank-commitment row. See [the clarified export rules](docs/laboratory_commitment_export.md).
+The first columns remain exactly `first_name`,
 `last_name`, `israeli_id`, `central_numbers`, `sample_receipt_date`, `sender`,
 `commitment_numbers`. Then: `document_id`, `form_id`, `extraction_id`, `source_sha256`,
 `data_origin`, `record_review_status`, `unresolved_fields`, `relationship_status`,
@@ -463,12 +512,15 @@ by `<field>_value_status`, `<field>_review_status`, `<field>_value_source` for e
 of the seven fields in that order. Unresolved fields are a JSON list.
 
 Only explicitly approved values enter business cells. Unreviewed/unresolved/rejected
-scalar cells are blank, and central/commitment cells are `[]` until approved. This
+scalar/commitment cells are blank, and central-number cells are `[]` until approved. This
 is deliberately stricter than the initial Task 11A option to display unverified
 provider candidates in business cells. Original candidates remain recoverable in
-the bound result bundle and in audit for every explicit action. Approved multi-value
-fields are compact JSON arrays of exact strings in ONE text cell; no deduplication,
-reordering, numeric conversion or Cartesian-product rows. Missing, unreadable,
+the bound result bundle and in audit for every explicit action. Approved central
+numbers remain a compact JSON array in one text cell. Each `commitment_numbers`
+cell contains one literal identifier. Exact duplicate commitments collapse only
+in the output of the same form, preserving first-occurrence order; original and
+reviewed lists/audit remain unchanged. There is no trimming, numeric conversion,
+cross-form deduplication or Cartesian product. Missing, unreadable,
 ambiguous, omitted, rejected and acknowledged-blank states remain distinguishable.
 
 ProcessingFailures columns: `document_id`, `attempt_reference`, `source_sha256`,
@@ -558,7 +610,7 @@ Runs and source bytes exist only in process memory, never `evaluation/artifacts/
 8. Click **Download Excel** after successful extraction, even when some/all fields
    or forms remain unresolved. Unsaved choices are excluded; the UI asks explicitly
    before downloading saved state with pending choices. The existing Task 11B
-   exporter writes all forms once plus the audit/failure sheets. It never approves
+   exporter includes all forms, expanding reviewed commitments into rows, plus the audit/failure sheets. It never approves
    a field because of download and makes no additional provider/OCR call.
 
 Gemini can return 429/quota, 503 or 504. A failed run has a safe processing error,

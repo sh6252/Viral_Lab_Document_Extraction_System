@@ -1,0 +1,184 @@
+{
+  "task": "Prepare Secure Render + Neon Hackathon Deployment",
+  "branch": "release/submission-2026-10-22",
+  "head": "01315c9733ae8f9310275fc9d8921de510dae5b7",
+  "architecture": "One Render Free Web Service serves React and authenticated API at one origin; Neon PostgreSQL.",
+  "approved_architecture_change": "User explicitly authorized FastAPI serving built React to avoid third-party cookies.",
+  "preexisting_files_deleted": [],
+  "changed_files": [
+    {
+      "path": ".env.example",
+      "before_sha256": "59d3c9cc6b9feeb6ff7d22d6389a12a525c7312ad614f727abd4f02428fae637",
+      "after_sha256": "75d3109396c9aaa27cb2ea4fd3e459e8de41794d6b349ba1ea57a75dfba92e57"
+    },
+    {
+      "path": "README.md",
+      "before_sha256": "7cda06ac373d524e3523ebaccbc4aaabc53924c5c2bc243d740ace970a458657",
+      "after_sha256": "31761a64a705789afa9aba94379326a9fdde8b98ebcdc1430e146b15effb8de0"
+    },
+    {
+      "path": "backend/cloud_app.py",
+      "before_sha256": null,
+      "after_sha256": "efdab8cef1a004e04f90eea1bdaf23e77f74b01e80853473ae193df6f6d01ae3"
+    },
+    {
+      "path": "backend/core/cloud_config.py",
+      "before_sha256": null,
+      "after_sha256": "7a1d6eed2563038544964cf409fe2b62b43eb4b14f319802a18a2efb200bc36e"
+    },
+    {
+      "path": "backend/core/demo_auth.py",
+      "before_sha256": null,
+      "after_sha256": "ed474d512a7063169e406ba8fa0e740ed84fa7d5c83fc4c1e050c63685f0b35f"
+    },
+    {
+      "path": "backend/persistence/business_repository.py",
+      "before_sha256": "dc9465288f4c1dcad5f630411bdb1244d230e960940bb4057107c99999af78ad",
+      "after_sha256": "ea9676cc0c2f26190386bd993de35649db5779179b5de06cce2e4178042801a9"
+    },
+    {
+      "path": "backend/persistence/cloud_database.py",
+      "before_sha256": null,
+      "after_sha256": "4d0d37c09103b1c9ffeb2c054ef4dde2af679d5620c14e230f78ac8ada736860"
+    },
+    {
+      "path": "backend/tools/cloud_migrate.py",
+      "before_sha256": null,
+      "after_sha256": "20437873227752640a70cdd1d758b21949fe6faaa609fcd3e7604e78299199b4"
+    },
+    {
+      "path": "backend/tools/demo_password.py",
+      "before_sha256": null,
+      "after_sha256": "13d8fe4e83a7821be3f4faaffa961f4265e85185c2e88ab39c792e7f8bcfadb8"
+    },
+    {
+      "path": "docs/release/DEPLOYMENT_HE.md",
+      "before_sha256": "8d5a33bd6fb89da10093707d6044e0d1f6fc56bda4adcca97fedec59a0984d35",
+      "after_sha256": "8f1e3fedaad368cc6cf177817026de812c4e4748a12896d98005f67f77f79e79"
+    },
+    {
+      "path": "docs/release/RELEASE_REPORT_HE.md",
+      "before_sha256": "d71aae6069124b5a066cbc677bb99c1051dede98e91b67945b301f9bc2646b98",
+      "after_sha256": "af4100b8ee2df9e3b3a6d91f653b4a21bb591c164c3de8cea54261b66609901c"
+    },
+    {
+      "path": "docs/release/RENDER_NEON_HE.md",
+      "before_sha256": null,
+      "after_sha256": "ef3a3a742854784d04b2fdafecdee3cbf046ec37b199fa5cf0d52362480ea85e"
+    },
+    {
+      "path": "docs/release/cloud-changes.json",
+      "before_sha256": null,
+      "after_sha256": "Covered by outer source inventory / archive; no circular self hash."
+    },
+    {
+      "path": "docs/release/source-files.json",
+      "before_sha256": "ba2189930c05af2290e13be0c8883f0c9a3a28ab28f8359bcab09e63aca7a668",
+      "after_sha256": "Covered by outer source inventory / archive; no circular self hash."
+    },
+    {
+      "path": "frontend/.env.example",
+      "before_sha256": null,
+      "after_sha256": "b42c09cc85c39f20b48f7380b27991cc5dbf92099ce07797b2f1284b2d8fbda7"
+    },
+    {
+      "path": "frontend/src/App.tsx",
+      "before_sha256": "689fb4cc18f331ed8abc5f361fbbef2e716bb3897d9955ce6329134ecf18a75c",
+      "after_sha256": "ce5d41c98bad1ad4443bda51b1251e6c90c01beceee9fdeb23778d4a44f720f9"
+    },
+    {
+      "path": "frontend/src/AuthGate.tsx",
+      "before_sha256": null,
+      "after_sha256": "8a93cfd1d7214d5536de79e5e8956f2f5cd101a5f62a7227f571b8e734713e79"
+    },
+    {
+      "path": "frontend/src/api.ts",
+      "before_sha256": "17ea1e9c6e48c2e4e6f898fac8ccee0169978259e8b4a0e88bc1153f19fe13cf",
+      "after_sha256": "453cb13aeb89588a0ca4238edc2eb46c1db43a67629933d9ab37f6b43e081fcd"
+    },
+    {
+      "path": "frontend/src/env.d.ts",
+      "before_sha256": null,
+      "after_sha256": "7521fc2af4fa67f53c3e83daedaf2e983947bf5341ab9fb6a51c9c141292a9e5"
+    },
+    {
+      "path": "frontend/src/main.tsx",
+      "before_sha256": "59430bd4842316256631239e729fca94a8b0167bc16fbde9a2378a271860645e",
+      "after_sha256": "f908d387e829fe5542ef6a7c7fa5911291d7f331e71ecb2c8d4529751018986b"
+    },
+    {
+      "path": "frontend/src/style.css",
+      "before_sha256": "77fa8827a1392240368092b8b7f8f1aa47f40a627a64aa141bde4772f9aca56c",
+      "after_sha256": "4a974fed784c7789fa2216a31fd2a04a1cee2d92a1057c8767a79181edb810e3"
+    },
+    {
+      "path": "frontend/tests/cloud-api.test.ts",
+      "before_sha256": null,
+      "after_sha256": "c10912e1389e716bbc363700ac12acc60f09db11e7bd4f79d7ba69743530122d"
+    },
+    {
+      "path": "frontend/tests/cloud-browser-smoke.ts",
+      "before_sha256": null,
+      "after_sha256": "e3e110ed01efa50c93d0e79359144d15cfc2df74fc3064f3b66d030102d63999"
+    },
+    {
+      "path": "render.yaml",
+      "before_sha256": null,
+      "after_sha256": "9a507104cd632cdb1a76ac85c66182afa9f8c83140efce2474e914f2afcbb111"
+    },
+    {
+      "path": "tests/cloud_browser_server.py",
+      "before_sha256": null,
+      "after_sha256": "c2f2de7f5db8c384abd7a47c344497e51bc6c2a9f39255974e9c730fe581da9a"
+    },
+    {
+      "path": "tests/integration/test_cloud_demo.py",
+      "before_sha256": null,
+      "after_sha256": "3ff58812f519d7734e5f0dd5dcb1cf3a49fbd4ca72656000c1cfb785423226f4"
+    },
+    {
+      "path": "tests/test_cloud_demo.py",
+      "before_sha256": null,
+      "after_sha256": "158b0926cd9138bdd40e52e72ded8ef7cbc92066a985ed28d2dff6a51761caa5"
+    }
+  ],
+  "source_file_count": 197,
+  "git_status_counts": {
+    "tracked_modified": 32,
+    "untracked_files": 56,
+    "staged_files": 0
+  },
+  "git_status_porcelain_v1": " M .env.example\n M .gitignore\n M README.md\n M backend/api/demo_schemas.py\n M backend/api/routes/demo.py\n M backend/persistence/business_codec.py\n M backend/persistence/business_models.py\n M backend/persistence/business_repository.py\n M backend/persistence/business_search.py\n M backend/services/business_review.py\n M backend/services/demo_workflow.py\n M backend/services/durable_workflow.py\n M backend/services/excel_export.py\n M backend/services/extraction/prompts.py\n M docs/architecture_decisions.md\n M docs/business_rules.md\n M docs/provider_integration.md\n M frontend/index.html\n M frontend/src/App.tsx\n M frontend/src/api.ts\n M frontend/src/main.tsx\n M frontend/src/style.css\n M frontend/tests/App.test.ts\n M frontend/tests/Records.test.ts\n M frontend/tests/appHarness.ts\n M tests/integration/test_business_records.py\n M tests/integration/test_business_repository.py\n M tests/test_demo_api.py\n M tests/test_excel_export.py\n M tests/test_extraction_prompts.py\n M tests/test_extraction_smoke.py\n M tests/test_review_export.py\n?? backend/api/bulk_export_schemas.py\n?? backend/cloud_app.py\n?? backend/core/cloud_config.py\n?? backend/core/demo_auth.py\n?? backend/persistence/cloud_database.py\n?? backend/services/bulk_export.py\n?? backend/services/form_review_policy.py\n?? backend/tools/cloud_migrate.py\n?? backend/tools/demo_password.py\n?? backend/tools/seed_synthetic_demo.py\n?? docs/batch_export_and_upload_audit.md\n?? docs/form_approval.md\n?? docs/form_approval_backup_verification.md\n?? docs/form_approval_migration_validation.md\n?? docs/laboratory_commitment_export.md\n?? docs/mvp_gap_analysis.md\n?? docs/release/DEPLOYMENT_HE.md\n?? docs/release/RELEASE_REPORT_HE.md\n?? docs/release/RENDER_NEON_HE.md\n?? docs/release/cloud-changes.json\n?? docs/release/integration-manifest.json\n?? docs/release/source-files.json\n?? docs/synthetic_demo_seeder.md\n?? frontend/.env.example\n?? frontend/BATCH_UX_NOTES.md\n?? frontend/DESIGN_NOTES.md\n?? frontend/FINAL_APPROVAL_UX.md\n?? frontend/public/brand.svg\n?? frontend/src/AuthGate.tsx\n?? frontend/src/env.d.ts\n?? frontend/src/workbench.ts\n?? frontend/tests/Batch.test.ts\n?? frontend/tests/FormApproval.test.ts\n?? frontend/tests/Premium.test.ts\n?? frontend/tests/WorkbenchUI.test.ts\n?? frontend/tests/browser-smoke.ts\n?? frontend/tests/cloud-api.test.ts\n?? frontend/tests/cloud-browser-smoke.ts\n?? frontend/tests/form-approval-e2e.ts\n?? frontend/tests/preview-server.ts\n?? frontend/tests/workbench.test.ts\n?? migrations/versions/0003_form_approval.py\n?? render.yaml\n?? scripts/release_snapshot.py\n?? tests/cloud_browser_server.py\n?? tests/fixtures/business_review_v1.json\n?? tests/form_approval_bridge.py\n?? tests/integration/test_cloud_demo.py\n?? tests/integration/test_form_approval.py\n?? tests/integration/test_form_approval_migration.py\n?? tests/test_bulk_export.py\n?? tests/test_cloud_demo.py\n?? tests/test_commitment_export_compatibility.py\n?? tests/test_form_approval.py\n?? tests/test_release_snapshot.py\n?? tests/test_seed_synthetic_demo.py\n",
+  "verification": {
+    "backend_offline_full_passed": 953,
+    "cloud_security_final_focused_passed": 37,
+    "postgresql_passed": 77,
+    "frontend_passed": 53,
+    "all_executed_test_failures": 0,
+    "typescript": "PASS",
+    "production_build_public_demo": "PASS",
+    "real_https_browser_third_party_cookies_blocked": "PASS",
+    "react_fastapi_xlsx_e2e": "PASS",
+    "pip_check": "PASS",
+    "python_ast": "PASS",
+    "git_diff_check": "PASS",
+    "render_blueprint_local_yaml_syntax": "PASS; Render API validation not performed",
+    "test_database": "review_test_viral_lab only; schema/table inventory unchanged",
+    "business_database_connected": false,
+    "neon_connected": false,
+    "live_gemini_calls": 0
+  },
+  "not_performed": [
+    "commit",
+    "push",
+    "deploy",
+    "Neon migration",
+    "fresh Linux/Render build",
+    "live clinical accuracy evaluation"
+  ],
+  "remaining_blockers": [
+    "Durable synthetic replay seeding unsupported; default local_ocr is not an implemented provider.",
+    "Live synthetic provider processing requires separate approval; no fake LIVE fallback.",
+    "Public URL and updated GitHub branch require explicit publish approval plus cloud acceptance checks."
+  ]
+}

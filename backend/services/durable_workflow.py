@@ -1,6 +1,6 @@
 """Existing upload/review/export behavior backed by PostgreSQL, without a TTL."""
 
-from backend.api.demo_schemas import DemoReviewCommand
+from backend.api.demo_schemas import DemoFinalizeCommand, DemoReviewCommand
 from backend.api.records_schemas import RecordsQuery
 from backend.core.config import AppConfig
 from backend.persistence.business_repository import BusinessRepository
@@ -28,4 +28,8 @@ class DurableWorkflow(DemoWorkflow):
 
     def review(self, run_id: str, form_id: str, command: DemoReviewCommand) -> dict:
         run = self.repository.review_atomic(run_id, lambda current: self._reviewed_run(current, form_id, command))
+        return self._project(run, form_id)
+
+    def finalize(self, run_id: str, form_id: str, command: DemoFinalizeCommand) -> dict:
+        run = self.repository.finalize_atomic(run_id, lambda current: self._finalized_run(current, form_id, command))
         return self._project(run, form_id)

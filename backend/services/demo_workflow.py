@@ -9,13 +9,13 @@ from threading import RLock
 import time
 from typing import Callable, get_args
 
-from backend.api.demo_schemas import DemoReviewCommand
+from backend.api.demo_schemas import DemoFinalizeCommand, DemoReviewCommand
 from backend.core.config import AppConfig
 from backend.domain import ExtractionRequest, ProviderPolicySnapshot
 from backend.domain.models import RequiredFieldName
 from backend.services.business_review import (
     BusinessReviewAction, BusinessReviewError, BusinessReviewResult, SourceBinding,
-    apply_business_review, snapshot_canonical,
+    FormApprovalAction, apply_business_review, snapshot_canonical,
 )
 from backend.services.excel_export import ProcessingFailure, export_workbook
 from backend.services.extraction.base import DocumentInput, ExtractionAdapter
@@ -151,12 +151,19 @@ class DemoWorkflow:
             result["failure"] = {"code": run.failure.failure_code, "retryable": run.failure.retryable,
                                  "message": "Extraction failed; no business record was created."}
         if selected is not None:
+            from backend.services.form_review_policy import POLICY_VERSION, review_reasons
+
             result["selected_form"] = {"form_id": selected.record.form_id, "revision": selected.record.revision,
                 "review_status": selected.record.review_status,
+                "finalized": selected.finalized, "review_policy_version": POLICY_VERSION,
+                "automatic_acceptance": False,
                 "fields": [{"field_name": f.field_name,
                     "provider_values": [{"raw": v.raw, "normalized": v.normalized} for v in f.original.values],
                     "provider_value_status": f.original.value_status, "provider_review_status": f.original.review_status,
-                    "reviewed_values": list(f.reviewed_values), "review_status": f.review_status}
+                    "reviewed_values": list(f.reviewed_values), "review_status": f.review_status,
+                    "value_source": f.value_source,
+                    "review_reasons": list(review_reasons(selected, f)),
+                    "requires_review": bool(review_reasons(selected, f))}
                     for f in selected.record.fields]}
         return result
 
@@ -200,7 +207,9 @@ class DemoWorkflow:
         actions = tuple(BusinessReviewAction(binding.source_sha256, binding.extraction_id,
             binding.canonical_snapshot_sha256, form_id, item.field_name, item.decision_id,
             command.expected_revision + index, command.operator_declaration, command.declared_at,
-            item.reason, fields[item.field_name].original, item.action, tuple(item.reviewed_values))
+            item.reason if item.reason.strip() else (
+                "SYSTEM:ROUTINE_CORRECTION_NO_FREE_TEXT" if item.action == "correct_and_approve" else item.reason),
+            fields[item.field_name].original, item.action, tuple(item.reviewed_values))
             for index, item in enumerate(command.actions))
         try:
             reviewed = apply_business_review(run.canonical_snapshot_json, binding, form_id, actions,
@@ -213,6 +222,39 @@ class DemoWorkflow:
         reviewed = replace(reviewed, canonical_snapshot_json=run.canonical_snapshot_json)
         updated = replace(run, results=tuple(reviewed if r.record.form_id == form_id else r for r in run.results))
         # Count snapshots once, plus accumulated audit text, to bound corrections.
+        if sum(len(repr(r.audit).encode("utf-8")) for r in updated.results) > self.max_snapshot_bytes:
+            raise DemoError("DEMO_REVIEW_LIMIT", 422)
+        return updated
+
+    def finalize(self, run_id: str, form_id: str, command: DemoFinalizeCommand) -> dict:
+        with self._lock:
+            updated = self._finalized_run(self._get(run_id), form_id, command)
+            self._runs[run_id] = updated
+            return self._project(updated, form_id)
+
+    def _finalized_run(self, run: DemoRun, form_id: str, command: DemoFinalizeCommand) -> DemoRun:
+        if not secrets.compare_digest(run.review_token, command.review_token):
+            raise DemoError("DEMO_RUN_BINDING_MISMATCH", 404)
+        previous = next((r for r in run.results if r.record.form_id == form_id), None)
+        if previous is None:
+            raise DemoError("DEMO_FORM_NOT_FOUND", 404)
+        binding = previous.record.binding
+        action = FormApprovalAction(binding.source_sha256, binding.extraction_id,
+            binding.canonical_snapshot_sha256, form_id, command.decision_id, command.expected_revision,
+            command.operator_declaration, command.declared_at, command.attest_all_values)
+        try:
+            reviewed = apply_business_review(run.canonical_snapshot_json, binding, form_id, (action,),
+                                            command.expected_revision, previous=previous)
+        except BusinessReviewError as error:
+            code = str(error)
+            if code in {"STALE_REVIEW_REVISION", "CONFLICTING_DECISION_REPLAY", "FORM_ALREADY_FINALIZED"}:
+                raise DemoError(code, 409) from None
+            if code == "FORM_HAS_UNRESOLVED_FIELDS":
+                raise DemoError(code, 422) from None
+            raise DemoError("INVALID_FORM_APPROVAL", 422) from None
+        if len(reviewed.audit) > 100:
+            raise DemoError("DEMO_REVIEW_LIMIT", 422)
+        updated = replace(run, results=tuple(reviewed if r.record.form_id == form_id else r for r in run.results))
         if sum(len(repr(r.audit).encode("utf-8")) for r in updated.results) > self.max_snapshot_bytes:
             raise DemoError("DEMO_REVIEW_LIMIT", 422)
         return updated

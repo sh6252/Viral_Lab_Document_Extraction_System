@@ -30,7 +30,7 @@ def rendered_prompt() -> str:
 
 
 def test_prompt_version_is_explicit_and_shared_with_gemini() -> None:
-    assert EXTRACTION_PROMPT_VERSION == "he-commitment-v2-identifiers"
+    assert EXTRACTION_PROMPT_VERSION == "he-commitment-v3-lab-commitments"
     assert GEMINI_EXTRACTION_PROMPT_VERSION == EXTRACTION_PROMPT_VERSION
     assert f"Prompt version: {EXTRACTION_PROMPT_VERSION}\n" in rendered_prompt()
     assert rendered_prompt() == build_extraction_prompt(_request().fields, "he-IL")
@@ -63,14 +63,28 @@ def test_identifier_definitions_distinguish_lab_and_financial_context() -> None:
     prompt = rendered_prompt()
     central = prompt.split("- central_numbers ", 1)[1].split("\n", 1)[0]
     commitment = prompt.split("- commitment_numbers ", 1)[1].split("\n", 1)[0]
-    assert "laboratory sample/accession identifiers" in central
-    assert '"דגימה"' in central and "surrounding context" in central
-    assert "financial commitment/authorization identifiers" in commitment
+    assert "internal laboratory sample/accession identifiers" in central
+    assert '"מרכזי"' in central and '"מספר מרכזי"' in central and "handwritten" in central
+    assert '"דגימה"' not in central
+    assert "commitment/authorization identifiers" in commitment
     for label in ("מספר התחייבות", "התחייבות", "דרישה"):
         assert f'"{label}"' in commitment
-    assert "only in a financial authorization context" in commitment
+    assert "surrounding document context establishes that role" in commitment
     assert "a laboratory test request alone does not establish it" in commitment
     assert "nearby labels, stickers, stamps, and surrounding text" in prompt
+
+
+def test_lab_specific_aliases_receipt_date_and_form_granularity():
+    prompt = rendered_prompt()
+    leumit = next(line for line in prompt.splitlines() if line.startswith("- On Leumit"))
+    assert '"לאומית"' in leumit and '"דגימה"' in leumit
+    assert 'Do not globally treat every "דגימה" number as a commitment' in leumit
+    assert "Examination/test codes are not commitment numbers" in prompt
+    assert "Every document received with a laboratory sample is a commitment document" in prompt
+    assert 'below the central-number label/sticker or at the relevant "התקבל" stamp' in prompt
+    assert "Do not substitute an unrelated document issue date" in prompt
+    assert "Do not split a logical form into output rows per commitment during extraction" in prompt
+    assert "Row expansion belongs to the reviewed Excel export only" in prompt
 
 
 def test_visual_heuristics_alone_cannot_assign_identifier_roles() -> None:

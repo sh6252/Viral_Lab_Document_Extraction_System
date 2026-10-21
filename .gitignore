@@ -40,6 +40,17 @@ data/patient_data/
 sample_documents/
 medical_documents/
 patient_documents/
+demo/fixtures/
+evaluation/fixtures/holdout/*.pdf
+
+# Local database snapshots, release archives and diagnostic output
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.bak
+*.log
+backups/
 
 # Generated exports and evaluation artifacts
 evaluation/benchmark/

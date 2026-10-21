@@ -48,26 +48,26 @@ test("successful two-form saves retain selections/reasons, confirm persisted sta
     await app.selectForm("two"); app.decide("israeli_id", "acknowledge_blank", "Blank ID inspected");
     await app.selectForm("one");
     for (const name of fields) app.decide(name, "approve_as_extracted", `Inspected ${name}`);
-    await app.click("Save explicit review actions");
+    await app.click("שמירת החלטות הביקורת");
     assert.equal(app.action("first_name").props.value, "approve_as_extracted", "Successful save must not erase the visible decision");
     assert.equal(app.reason("first_name").props.value, "Inspected first_name");
-    assert.match(text(app.tree), /Saved 7 review actions.*complete.*revision 7/);
-    assert.ok(app.button("Save explicit review actions").props.disabled, "Already saved choices cannot be resubmitted");
-    assert.ok(!app.button("Download Excel").props.disabled);
+    assert.match(text(app.tree), /נשמרו 7 החלטות ביקורת.*הבדיקה הושלמה.*גרסה 7/);
+    assert.ok(app.button("שמירת החלטות הביקורת").props.disabled, "Already saved choices cannot be resubmitted");
+    assert.ok(!app.button("ייצוא ל־Excel").props.disabled);
     await app.selectForm("two");
     assert.equal(app.action("first_name").props.value, "");
     assert.equal(app.action("israeli_id").props.value, "acknowledge_blank", "Saving the other form must preserve this unsaved decision");
     for (const name of fields) app.decide(name, name === "israeli_id" ? "acknowledge_blank" : "approve_as_extracted");
-    await app.click("Save explicit review actions");
+    await app.click("שמירת החלטות הביקורת");
     assert.equal(app.action("israeli_id").props.value, "acknowledge_blank");
-    assert.match(text(app.tree), /acknowledged_blank/);
+    assert.match(text(app.tree), /אושר כשדה ריק/);
     assert.equal(mock.commands[1].actions.find(a => a.field_name === "israeli_id")!.reviewed_values.length, 0);
     assert.equal(mock.commands[1].operator_declaration, "Declared synthetic operator");
     assert.ok(mock.commands.every(c => c.actions.every(a => a.reason.trim())));
     await app.selectForm("one");
     assert.equal(app.action("first_name").props.value, "approve_as_extracted");
-    assert.ok(app.button("Save explicit review actions").props.disabled);
-    await app.click("Download Excel");
+    assert.ok(app.button("שמירת החלטות הביקורת").props.disabled);
+    await app.click("ייצוא ל־Excel");
     assert.ok(app.download); assert.equal(app.confirmations, 0, "Saved choices are not unsaved changes");
     assert.equal(mock.commands.flatMap(c => c.actions).length, 14);
   } finally { globalThis.fetch = original; }
@@ -78,12 +78,12 @@ test("save validation error preserves decisions, corrected values, operator and 
   try {
     const app = appHarness(); await app.upload(); app.operator("Declared operator");
     app.decide("first_name", "correct_and_approve", "Carefully checked source"); app.value("first_name", 0, "0007 עברית");
-    mock.fail("422"); await app.click("Save explicit review actions");
+    mock.fail("422"); await app.click("שמירת החלטות הביקורת");
     assert.equal(app.action("first_name").props.value, "correct_and_approve");
     assert.equal(app.reason("first_name").props.value, "Carefully checked source");
-    assert.match(text(app.tree), /INVALID_DEMO_REVIEW.*preserved/);
-    assert.ok(!app.button("Save explicit review actions").props.disabled);
-    mock.fail(""); await app.click("Save explicit review actions");
+    assert.match(text(app.tree), /INVALID_DEMO_REVIEW.*נשמרו במסך/);
+    assert.ok(!app.button("שמירת החלטות הביקורת").props.disabled);
+    mock.fail(""); await app.click("שמירת החלטות הביקורת");
     assert.equal(mock.commands[1].operator_declaration, "Declared operator");
     assert.deepEqual(mock.commands[1].actions[0].reviewed_values, ["0007 עברית"]);
   } finally { globalThis.fetch = original; }
@@ -94,14 +94,14 @@ test("ambiguous save failure retries the SAME command and does not duplicate per
   try {
     const app = appHarness(); await app.upload(); app.operator("Declared operator");
     for (const name of fields) app.decide(name, "approve_as_extracted");
-    mock.fail("lost-response"); await app.click("Save explicit review actions");
-    assert.match(text(app.tree), /unknown.*preserved/);
+    mock.fail("lost-response"); await app.click("שמירת החלטות הביקורת");
+    assert.match(text(app.tree), /תוצאת השמירה אינה ידועה.*נשמרו במסך/);
     assert.equal(app.action("first_name").props.value, "approve_as_extracted");
-    assert.ok(app.button("Download Excel").props.disabled);
-    await app.click("Retry SAME review request");
+    assert.ok(app.button("ייצוא ל־Excel").props.disabled);
+    await app.click("שליחה חוזרת של אותה בקשה");
     assert.deepEqual(mock.commands[1], mock.commands[0]);
     assert.equal(mock.forms[0].revision, 7);
-    assert.ok(!app.button("Download Excel").props.disabled);
+    assert.ok(!app.button("ייצוא ל־Excel").props.disabled);
   } finally { globalThis.fetch = original; }
 });
 
@@ -110,9 +110,9 @@ test("editing one saved decision sends only that new decision and keeps the othe
   try {
     const app = appHarness(); await app.upload(); app.operator("Declared operator");
     for (const name of fields) app.decide(name, "approve_as_extracted");
-    await app.click("Save explicit review actions");
+    await app.click("שמירת החלטות הביקורת");
     app.decide("sender", "approve_as_extracted", "Rechecked sender explicitly");
-    await app.click("Save explicit review actions");
+    await app.click("שמירת החלטות הביקורת");
     assert.equal(mock.commands[1].actions.length, 1);
     assert.equal(mock.commands[1].actions[0].field_name, "sender");
     assert.equal(mock.commands[1].expected_revision, 7);

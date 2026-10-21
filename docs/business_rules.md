@@ -1,6 +1,6 @@
 # Business rules - approved baseline
 
-Status: approved architecture baseline, 2026-10-13. These rules govern the MVP unless superseded by written laboratory decisions.
+Status: approved architecture baseline, 2026-10-13; export cardinality and laboratory identifier semantics clarified by the laboratory on 2026-10-20. The clarification supersedes the previous one-Excel-row-per-logical-form rule.
 
 ## Required business fields
 
@@ -18,7 +18,7 @@ Identifier-like values, including Israeli IDs, central numbers, and commitment n
 
 ## Approved rules
 
-BR-001. One logical commitment form equals one Excel row, regardless of the number of central numbers or commitment numbers.
+BR-001. A logical form remains the persisted/reviewable unit. Export one Excel row per exact distinct reviewed commitment number in that form, preserving first-occurrence order. Repeat all other fields and all central numbers on each row. If no reviewed commitment is present, export one blank-commitment row with its actual review statuses. Never form a Cartesian product or deduplicate across forms.
 
 BR-002. Missing, unreadable, and ambiguous values must never be guessed. They require review, and may remain blank after explicit human acknowledgment.
 
@@ -26,12 +26,15 @@ BR-003. Automatic field acceptance must follow a validated, field-specific risk 
 
 BR-004. Export all logical forms, including unresolved forms, to Excel with clearly marked record and field review statuses. Preserve the seven required business fields and add review metadata. Processing failures must be represented separately without pretending they are extracted commitments.
 
+BR-005. Every document received with a laboratory sample is a commitment document; this does not establish the role of every number. Commitment labels include "מספר התחייבות", contextual "דרישה", and contextual "דגימה" specifically on Leumit forms. Examination/test codes are not commitments. Central numbers are internal laboratory sample identifiers, including "מרכזי" stickers and handwritten "מספר מרכזי". Receipt dates come from below the central identifier or the relevant "התקבל" stamp, not an unrelated document date. Conflicting/unsupported roles or dates remain ambiguous for review.
+
 ## Logical form and export semantics
 
-- A logical form is the reviewable document unit that maps to one Excel row.
+- A logical form is the reviewable/persisted document unit; export expansion does not create new records or review revisions.
 - A logical form may contain zero, one, or many central numbers.
 - A logical form may contain zero, one, or many commitment numbers.
-- Multiple central numbers or commitment numbers remain multi-value fields on the same row unless the laboratory later defines a different rule.
+- Central numbers remain a compact JSON array on every Excel row; `commitment_numbers` contains exactly one literal text identifier per expanded row, or a blank cell.
+- Exact duplicate reviewed commitments collapse only in derived output rows, retaining their first occurrence. No trimming or numeric/normalized comparison is used: `0001`, `1` and ` 0001` stay distinct. Full raw/reviewed lists and audit history retain all occurrences. Numbers repeated in different forms remain separate rows; no global uniqueness is asserted.
 - Ambiguous relationships between central numbers and commitment numbers are preserved as unresolved relationship metadata. The system must not create cartesian-product rows or infer pairings without evidence or human review.
 - Unresolved relationships do not prevent export under BR-004. They must be marked in review metadata so downstream users can distinguish verified, corrected, ambiguous, missing, unreadable, and processing-failed values.
 

@@ -46,7 +46,8 @@ def test_status_sender_date_filters_and_safe_summary_shape(pg_engine):
     assert item["summary"]["first_name"] == ["שם סינתטי מתוקן"]
     assert item["summary"]["israeli_id"] == ["000123"]
     assert item["created_at"] and item["updated_at"] >= item["created_at"]
-    assert set(item) == {"run_id", "document_id", "form_id", "revision", "review_status", "summary", "created_at", "updated_at"}
+    assert set(item) == {"run_id", "document_id", "form_id", "revision", "review_status", "summary", "created_at", "updated_at", "finalized"}
+    assert item["finalized"] is False  # Existing field decisions never fabricate a form-level attestation.
     assert client.get(LIST, params={"status": "pending"}).json()["total"] == 1
     assert client.get(LIST, params={"sender": "מרכז"}).json()["total"] == 0  # Exact sender filter.
     assert client.get(LIST, params={"receipt_date": "2026-02-02"}).json()["total"] == 0

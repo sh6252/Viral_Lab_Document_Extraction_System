@@ -71,6 +71,6 @@ events = Table(
     UniqueConstraint("document_id", "form_id", "revision", name="uq_business_event_revision"),
     CheckConstraint("previous_revision >= 0 AND revision = previous_revision + 1", name="ck_business_event_revision"),
     CheckConstraint("field_name IN ('first_name','last_name','israeli_id','central_numbers',"
-                    "'sample_receipt_date','sender','commitment_numbers')", name="ck_business_event_field"),
+                    "'sample_receipt_date','sender','commitment_numbers','__form__')", name="ck_business_event_field"),
     CheckConstraint("event_sha256 ~ '^[0-9a-f]{64}$'", name="ck_business_event_hash"),
 )

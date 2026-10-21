@@ -7,7 +7,7 @@ from functools import wraps
 from hashlib import sha256
 from typing import ParamSpec, TypeVar
 
-from sqlalchemy import Connection, Engine, func, insert, select, update
+from sqlalchemy import Connection, Engine, func, insert, select, text, update
 
 from backend.persistence import business_codec as codec
 from backend.persistence.business_models import documents, events, records
@@ -36,10 +36,13 @@ def _safe(method: Callable[Parameters, Result]) -> Callable[Parameters, Result]:
 
 
 class BusinessRepository:
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, *, capacity_limits: tuple[int, int] | None = None):
         if engine.dialect.name != "postgresql":
             raise ValueError("POSTGRESQL_REQUIRED")
         self.engine = engine
+        if capacity_limits is not None and any(limit <= 0 for limit in capacity_limits):
+            raise ValueError("POSITIVE_BUSINESS_CAPACITY_REQUIRED")
+        self.capacity_limits = capacity_limits
 
     @_safe
     def check_ready(self) -> None:
@@ -55,6 +58,13 @@ class BusinessRepository:
                 or sha256(run.source).hexdigest() != run.source_sha256):
             raise DemoError("INVALID_BUSINESS_DOCUMENT", 422)
         with self.engine.begin() as conn:
+            if self.capacity_limits is not None:
+                # Serialize bounded admissions in this database, in the insert transaction.
+                conn.execute(text("SELECT pg_advisory_xact_lock(817420261022)"))
+                count, size = conn.execute(select(func.count(), func.coalesce(func.sum(
+                    func.octet_length(documents.c.source_bytes)), 0))).one()
+                if count >= self.capacity_limits[0] or size + len(run.source) > self.capacity_limits[1]:
+                    raise DemoError("DEMO_CAPACITY_REACHED", 503)
             conn.execute(insert(documents).values(document_id=run.run_id, review_token=run.review_token,
                 source_bytes=run.source, source_sha256=run.source_sha256, mime_type=run.mime_type,
                 status="processing", prompt_version=run.prompt_version, pipeline_version=run.pipeline_version,
@@ -167,13 +177,14 @@ class BusinessRepository:
                                 or saved["revision"] != entry.revision):
                             raise ValueError("AUDIT_INTEGRITY_FAILURE")
                     summary = {field.field_name: (list(field.reviewed_values)
-                        if field.review_status in {"approved_provider", "approved_corrected"}
+                        if field.review_status in {"approved_provider", "approved_corrected", "accepted_by_form"}
                         else [value.raw for value in field.original.values] if field.review_status == "unreviewed" else [])
                         for field in record.fields}
                     assert tuple(summary) == FIELDS
                     items.append({"run_id": row["document_id"], "document_id": row["document_id"],
                         "form_id": record.form_id, "revision": record.revision,
                         "review_status": "completed" if record.review_status == "complete" else "pending",
+                        "finalized": result.finalized,
                         "summary": summary, "created_at": row["created_at"],
                         "updated_at": max((event["received_at"] for event in audit), default=row["created_at"])})
                 return {"items": items, "total": total, "limit": query.limit, "offset": query.offset}
@@ -211,8 +222,20 @@ class BusinessRepository:
 
     @_safe
     def review_atomic(self, run_id: str, transition: Callable[[DemoRun], DemoRun]) -> DemoRun:
+        return self._review_atomic(run_id, transition, finalize=False)
+
+    @_safe
+    def finalize_atomic(self, run_id: str, transition: Callable[[DemoRun], DemoRun]) -> DemoRun:
+        return self._review_atomic(run_id, transition, finalize=True)
+
+    def _review_atomic(self, run_id: str, transition: Callable[[DemoRun], DemoRun], *, finalize: bool) -> DemoRun:
         with self.engine.begin() as conn:
             before = self._load(conn, run_id, write=True)
+            if finalize:
+                definition = conn.execute(text("SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                    "WHERE conrelid = 'business_review_events'::regclass AND conname = 'ck_business_event_field'")).scalar_one_or_none()
+                if definition is None or "__form__" not in definition or "field_name = ANY" not in definition:
+                    raise DemoError("FORM_APPROVAL_MIGRATION_REQUIRED", 503)
             after = transition(before)
             if replace(after, results=before.results) != before or len(after.results) != len(before.results):
                 raise ValueError("INVALID_BUSINESS_REVIEW_TRANSITION")

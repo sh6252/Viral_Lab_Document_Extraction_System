@@ -89,7 +89,8 @@ test("Hebrew records search/filter/pagination uses bounded GET queries and reope
     await app.openRecord(1);
     assert.equal(app.action("israeli_id").props.value, "");
     assert.ok(app.hasPreview());
-    assert.match(text(app.tree), /SAVED.*mock/);
+    assert.ok(app.nodes().some(n => n.type === "a" && n.props.href === "blob:synthetic" && n.props.rel === "noopener noreferrer"), "Protected object URL remains available when the inline viewer is unsupported");
+    assert.match(text(app.tree), /רשומה שמורה.*mock/);
     assert.ok(mock.calls.some(c => c.path === "/api/v1/demo-runs/doc-0/source"));
     assert.ok(mock.calls.every(c => c.method === "GET"));
   } finally { globalThis.fetch = original; }
@@ -103,20 +104,20 @@ test("reopened approved date can be corrected explicitly; saving preserves other
     app.operator("Declared synthetic reviewer");
     app.decide("sample_receipt_date", "correct_and_approve", "Corrected after checking persisted original");
     app.value("sample_receipt_date", 0, "2026-02-02");
-    await app.click("Save explicit review actions");
+    await app.click("שמירת החלטות הביקורת");
     assert.equal(mock.commands.length, 1);
     assert.equal(mock.commands[0].expected_revision, 7);
     assert.equal(mock.commands[0].actions.length, 1);
     assert.deepEqual(mock.commands[0].actions[0].reviewed_values, ["2026-02-02"]);
     assert.equal(mock.forms.get("doc-0/one")!.fields[4].provider_values[0].raw, originalProvider);
     assert.equal(mock.forms.get("doc-0/two")!.revision, 7);
-    assert.match(text(app.tree), /revision 8/);
+    assert.match(text(app.tree), /גרסה 8/);
     assert.equal(app.action("sample_receipt_date").props.value, "correct_and_approve");
-    await app.click("Download Excel");
+    await app.click("ייצוא ל־Excel");
     assert.equal(await app.download!.text(), "synthetic XLSX export");
     assert.ok(mock.calls.filter(c => c.method === "POST").every(c => c.path.endsWith("/review")));
     const restarted = appHarness(); await restarted.click("חיפוש / רענון"); await restarted.openRecord();
-    assert.match(text(restarted.tree), /revision 8/);
+    assert.match(text(restarted.tree), /גרסה 8/);
     assert.equal(restarted.action("sample_receipt_date").props.value, "");
     assert.equal(mock.commands.length, 1, "Reopening must not resubmit past decisions");
   } finally { globalThis.fetch = original; }

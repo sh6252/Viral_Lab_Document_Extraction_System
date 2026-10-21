@@ -21,7 +21,7 @@ def field_values(name: str, *, include_normalized: bool = False) -> ColumnElemen
     # Corrected/approved values take precedence. Acknowledged blanks and explicitly
     # unresolved/rejected values are never repopulated from the original candidate.
     return case(
-        (field["review_status"].astext.in_(("approved_provider", "approved_corrected")), field["reviewed_values"]),
+        (field["review_status"].astext.in_(("approved_provider", "approved_corrected", "accepted_by_form")), field["reviewed_values"]),
         (field["review_status"].astext == "unreviewed", raw),
         else_=cast(literal("[]"), JSONB),
     )

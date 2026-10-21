@@ -52,14 +52,20 @@ HTTP contracts and registry selection. Shared contract tests remain in
 `tests/test_provider_contracts.py`; registry extension uses a synthetic provider.
 These tests do not establish live model accuracy.
 
-The active shared prompt is `he-commitment-v2-identifiers`. It distinguishes
-laboratory sample/accession identifiers from financial commitment/authorization
-identifiers using labels and context, preserves supported multiple values, and
-requests ambiguous empty fields with notes when the role cannot be established.
+The active shared prompt is `he-commitment-v3-lab-commitments` (2026-10-20 laboratory
+clarification). It distinguishes internal central identifiers from commitments and
+test codes, recognizes contextual `דרישה` and Leumit-specific `דגימה`, and prefers
+the receipt date below a central-number label/sticker or at the relevant `התקבל`
+stamp. It preserves complete multi-value logical forms and requests ambiguous
+empty fields with notes when the identifier role or receipt date is uncertain.
+Commitment-row expansion happens only in the reviewed Excel exporter, not in
+extraction or persistence. Historical v1/v2 snapshots/provenance are unchanged.
 The JSON contract and other field instructions remain unchanged. Offline tests
 verify the prompt contract; extraction accuracy requires a separately authorized
-comparison against the preserved v1 baseline in a new output directory, using
+comparison against a frozen prior-prompt baseline in a new output directory, using
 the same documents, ground truth, model, pipeline, and runtime settings.
+No live evaluation of v3 was executed for this clarification; offline mocked tests
+do not establish extraction accuracy or an improvement over prior prompts.
 Task 8C's earlier `he-commitment-v2` name experiment did not improve measured name
 accuracy and was reverted to v1. It is separate from this identifier-only change;
 see `task8c_prompt_experiment.md` for preserved results and closure.
@@ -75,8 +81,10 @@ old commands there describe past runs and may no longer be executable.
 
 Live availability, quality, latency and quota require separately authorized
 verification. Evidence is optional and preserved when returned, not guaranteed for
-every field. Authentication, audit persistence, review, export and PostgreSQL jobs
-remain unimplemented. Uploaded bytes are read and validated in memory before the
+every field. Production authentication, runtime OCR and PostgreSQL jobs remain
+unimplemented. Durable business review/audit/export are available through the
+explicit launcher in `business_persistence.md`; the general extraction endpoint
+remains stateless. Uploaded bytes are read and validated in memory before the
 adapter authorizes outbound transmission. HTTP uses the existing `ExtractionResult`
 contract rather than redefining the target architecture described in the ADRs.
 

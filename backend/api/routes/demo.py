@@ -8,8 +8,10 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from starlette.concurrency import run_in_threadpool
 
-from backend.api.demo_schemas import DemoReviewCommand
+from backend.api.demo_schemas import DemoFinalizeCommand, DemoReviewCommand
 from backend.api.records_schemas import RecordsQuery
+from backend.api.bulk_export_schemas import BulkExportCommand
+from backend.services.bulk_export import bulk_export
 from backend.services.business_review import BusinessReviewError
 from backend.services.demo_workflow import DemoError, DemoWorkflow
 from backend.services.excel_export import ExcelExportError
@@ -85,13 +87,21 @@ async def upload_demo(request: Request, file: Annotated[UploadFile, File()],
                       allow_external_processing: Annotated[bool, Form()] = False,
                       locale: Annotated[str, Form()] = "he-IL") -> dict:
     service = _service(request)
-    if set((await request.form()).keys()) - {"file", "allow_external_processing", "locale"}:
+    form = await request.form()
+    if len(form.getlist("file")) != 1 or set(form.keys()) - {"file", "allow_external_processing", "locale"}:
         raise DemoError("INVALID_DEMO_INPUT")
     content = await read_upload_bytes(file, max_bytes=service.config.max_upload_bytes)
     mime = detect_supported_mime_type(content)
     if file.content_type and file.content_type != mime:
         raise UnsupportedDocumentType("MIME signature mismatch.")
     return await run_in_threadpool(service.create, content, mime, allow_external_processing, locale)
+
+
+@router.post("/business-records/export.xlsx")
+def export_business_rows(request: Request, command: BulkExportCommand) -> Response:
+    return Response(bulk_export(_service(request), command),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="workbench-records.xlsx"', "Cache-Control": "no-store"})
 
 
 @router.get("/demo-runs/{run_id}")
@@ -107,6 +117,11 @@ def review_demo(request: Request, run_id: str, form_id: str, command: DemoReview
 @router.get("/demo-runs/{run_id}/audit")
 def audit_demo(request: Request, run_id: str, form_id: str | None = None) -> dict:
     return _service(request).history(run_id, form_id)
+
+
+@router.post("/demo-runs/{run_id}/forms/{form_id:path}/finalize")
+def finalize_demo(request: Request, run_id: str, form_id: str, command: DemoFinalizeCommand) -> dict:
+    return _service(request).finalize(run_id, form_id, command)
 
 
 @router.get("/demo-runs/{run_id}/source")

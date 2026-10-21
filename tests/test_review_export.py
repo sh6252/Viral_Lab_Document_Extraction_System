@@ -51,7 +51,8 @@ def test_operator_creates_reopenable_workbook_bundle_and_hash_without_network(tm
     assert summary["workbook_sha256"] == hashlib.sha256(data).hexdigest()
     assert summary["forms"] == 2 and summary["complete_records"] == summary["unresolved_records"] == 1
     book = read_workbook(data)
-    assert len(book["Forms"][1]) == 2 and len(book["ReviewAudit"][1]) == 7
+    assert len(book["Forms"][1]) == 3 and len(book["ReviewAudit"][1]) == 7
+    assert [row["commitment_numbers"] for row in book["Forms"][1]] == ["00001", "00002", ""]
     bundle = json.loads(args["output_path"].with_suffix(".review.json").read_text(encoding="utf-8"))
     assert bundle["source_binding"]["data_origin"] == ("live" if live else "historical_replay")
     assert bundle["workbook_sha256"] == summary["workbook_sha256"]
@@ -96,7 +97,8 @@ def test_optional_failures_remain_separate(tmp_path):
     save(failures, [asdict(failure())])
     summary = run_operator(**args, failures_path=failures)
     book = read_workbook(args["output_path"].read_bytes())
-    assert summary["forms"] == len(book["Forms"][1]) == 1
+    assert summary["forms"] == 1 and len(book["Forms"][1]) == 2
+    assert [row["commitment_numbers"] for row in book["Forms"][1]] == ["00001", "00002"]
     assert summary["processing_failures"] == len(book["ProcessingFailures"][1]) == 1
 
 

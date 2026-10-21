@@ -72,7 +72,7 @@ def test_upload_all_types_preserves_all_forms_and_no_autoapproval(content, mime)
     run = result.json()
     assert run["status"] == "succeeded" and run["data_origin"] == "live"
     assert run["extraction_id"] == adapter.result.extraction_id
-    assert run["prompt_version"] == "he-commitment-v2-identifiers" and run["pipeline_version"] == "api-v1"
+    assert run["prompt_version"] == "he-commitment-v3-lab-commitments" and run["pipeline_version"] == "api-v1"
     assert run["form_ids"] == ["form-1", "form-2"]
     assert [f["field_name"] for f in run["selected_form"]["fields"]] == list(FIELDS)
     assert all(f["review_status"] == "unreviewed" for f in run["selected_form"]["fields"])
@@ -89,7 +89,7 @@ def test_provider_failure_is_separate_failure_workbook_with_no_fake_form(error):
     assert response.status_code == 201
     run = response.json()
     assert run["status"] == "failed" and run["selected_form"] is None and run["form_ids"] == []
-    assert run["extraction_id"] is None and run["prompt_version"] == "he-commitment-v2-identifiers"
+    assert run["extraction_id"] is None and run["prompt_version"] == "he-commitment-v3-lab-commitments"
     assert run["failure"]["code"] == error.code and "PRIVATE" not in response.text
     data = client.get(f"{BASE}/{run['run_id']}/export.xlsx").content
     book = read_workbook(data)

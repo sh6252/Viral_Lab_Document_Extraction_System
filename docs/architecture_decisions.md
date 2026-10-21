@@ -16,7 +16,7 @@ ADR-005 ACCEPTED: Extraction adapters return candidate values, evidence, diagnos
 
 ADR-006 ACCEPTED: Validation, field acceptance, review policy, and export eligibility are independent of the AI/OCR provider.
 
-ADR-007 ACCEPTED: Logical forms are separate from extraction candidates and review state. One logical commitment form equals one Excel row.
+ADR-007 ACCEPTED, export cardinality clarified 2026-10-20: Logical forms remain separate persisted/reviewable units. Excel expands each form into one row per exact distinct reviewed commitment number, repeating all relevant central numbers and other fields. No reviewed commitment produces one blank row with actual review metadata. Expansion creates no database records, approvals or audit events.
 
 ADR-008 ACCEPTED: Export all logical forms to Excel, including unresolved forms, with explicit record and field review statuses. Processing failures must be represented separately and must not be presented as extracted commitments.
 
@@ -27,8 +27,8 @@ ADR-010 ACCEPTED: Use evaluation-first development. Benchmark fixtures and deter
 ## Superseded or clarified decisions
 
 - The earlier "only approved records may enter final export" rule is superseded by BR-004. The export now includes all logical forms with review metadata. Approval affects status and downstream trust, not row inclusion.
-- The earlier "one row per commitment" wording is clarified as one row per logical commitment form. Multiple central numbers and multiple commitment numbers are exported as multi-value fields on that row unless a future business decision changes this.
-- Segmentation and logical form grouping remain explicit reviewable entities, but export cardinality is governed by logical forms, not by individual identifier counts.
+- The 2026-10-20 laboratory clarification supersedes the intermediate one-row-per-logical-form export rule: one exact distinct reviewed commitment number identifies a derived output row within its logical form. Central numbers remain a multi-value array, with no inferred pairings or Cartesian product. See `laboratory_commitment_export.md` for duplicate and blank policies.
+- Segmentation, grouping, persistence and review stay at logical-form granularity. Only Excel cardinality changes; no global commitment-number uniqueness is inferred.
 
 ## Module boundaries
 
@@ -127,7 +127,7 @@ Important fields:
 
 ### LogicalForm
 
-Reviewable form unit. One logical commitment form equals one Excel row.
+Reviewable/persisted form unit. Excel may derive several commitment rows from one form; see ADR-007.
 
 Important fields:
 

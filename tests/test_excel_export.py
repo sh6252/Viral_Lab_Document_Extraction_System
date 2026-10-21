@@ -10,6 +10,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from backend.services.business_review import FIELDS, apply_business_review
+from backend.domain import ExtractionResult
 from backend.services.excel_export import (
     AUDIT_COLUMNS, FAILURE_COLUMNS, FORM_COLUMNS, ExcelExportError, ProcessingFailure, export_workbook,
 )
@@ -69,7 +70,7 @@ def test_exact_sheets_headers_text_identifiers_dates_and_hebrew():
     assert row["israeli_id"] == "000123" and row["sample_receipt_date"] == "01/02/2026"
     assert row["first_name"] == "טקסט בדיקה"
     assert json.loads(row["central_numbers"]) == ["0007", "008/9)", "0007"]
-    assert json.loads(row["commitment_numbers"]) == ["00001", "00002"]
+    assert [r["commitment_numbers"] for r in book["Forms"][1]] == ["00001", "00002"]
     assert row["review_revision"] == "7" and row["record_review_status"] == "complete"
     assert row["relationship_status"] == "unresolved"
 
@@ -78,7 +79,7 @@ def test_no_autoapproval_unresolved_blank_scalar_and_empty_arrays():
     row = read_workbook(export_workbook([reviewed()]))["Forms"][1][0]
     assert row["record_review_status"] == "unresolved"
     assert all(row[name] == "" for name in FIELDS if name not in {"central_numbers", "commitment_numbers"})
-    assert row["central_numbers"] == row["commitment_numbers"] == "[]"
+    assert row["central_numbers"] == "[]" and row["commitment_numbers"] == ""
     assert row["first_name_review_status"] == "unreviewed" and row["first_name_value_source"] == "none"
     assert json.loads(row["unresolved_fields"]) == list(FIELDS)
 
@@ -178,3 +179,102 @@ def test_duplicate_failure_and_binding_conflicts_are_rejected():
     other = reviewed(source=binding(source_sha256="b"*64))
     with pytest.raises(ExcelExportError, match="EXTRACTION_BINDING_CONFLICT"):
         export_workbook([reviewed(), other])
+
+
+def commitment_record(commitments):
+    """Actual validated review factories, with two relevant central identifiers."""
+    payload = canonical().model_dump(mode="json")
+    fields = payload["logical_forms"][0]["fields"]
+    for name, values in {"first_name": ["שרה"], "last_name": ["כהן"], "israeli_id": ["012345678"],
+                         "central_numbers": ["803215", "803216"], "commitment_numbers": commitments}.items():
+        fields[name]["values"] = [{"raw": value} for value in values]
+    return complete(ExtractionResult.model_validate(payload))
+
+
+@pytest.mark.parametrize("commitments", [("000001",), ("456001", "456002", "456003")])
+def test_commitment_rows_repeat_all_business_values_and_metadata_without_cartesian_product(commitments):
+    from copy import deepcopy
+
+    result = commitment_record(commitments)
+    before = deepcopy(result)
+    book = read_workbook(export_workbook([result], [failure()]))
+    rows = book["Forms"][1]
+    assert len(rows) == len(commitments)
+    assert [row["commitment_numbers"] for row in rows] == list(commitments)
+    for row in rows:
+        assert row["first_name"] == "שרה" and row["last_name"] == "כהן" and row["israeli_id"] == "012345678"
+        assert json.loads(row["central_numbers"]) == ["803215", "803216"]
+        assert row["sample_receipt_date"] == "01/02/2026" and row["record_review_status"] == "complete"
+        assert row["form_id"] == result.record.form_id and row["review_revision"] == "7"
+        assert {k: v for k, v in row.items() if k != "commitment_numbers"} == {
+            k: v for k, v in rows[0].items() if k != "commitment_numbers"}
+    assert len(book["ReviewAudit"][1]) == 7 and len(book["ProcessingFailures"][1]) == 1
+    assert result == before and export_workbook([result]) == export_workbook([result])
+
+
+def test_exact_duplicates_collapse_only_output_rows_and_keep_full_audit_and_distinct_formatting():
+    commitments = ("0009", "0009", "9", " 0009", "0009 ", "0009")
+    result = commitment_record(commitments)
+    book = read_workbook(export_workbook([result]))
+    assert [row["commitment_numbers"] for row in book["Forms"][1]] == ["0009", "9", " 0009", "0009 "]
+    audit = next(row for row in book["ReviewAudit"][1] if row["field_name"] == "commitment_numbers")
+    assert json.loads(audit["original_raw_values"]) == list(commitments)
+    assert json.loads(audit["reviewed_values"]) == list(commitments)
+    assert len(book["ReviewAudit"][1]) == 7
+    assert result.record.fields[-1].reviewed_values == commitments
+
+
+def test_multiple_form_commitment_counts_order_and_no_cross_form_deduplication():
+    from copy import deepcopy
+
+    payload = canonical().model_dump(mode="json")
+    payload["logical_forms"].append(deepcopy(payload["logical_forms"][0]))
+    payload["logical_forms"][1]["form_id"] = "form-2"
+    for form, commitments in zip(payload["logical_forms"], [("0002", "0001", "0002"), ("0002",)], strict=True):
+        form["fields"]["commitment_numbers"]["values"] = [{"raw": value} for value in commitments]
+    value = ExtractionResult.model_validate(payload)
+    source = binding(value)
+    results = [apply_business_review(value, source, form.form_id,
+        [action(value, source, form=form.form_id, name=name, kind="approve_as_extracted", revision=i,
+                decision_id=f"decision-{i}") for i, name in enumerate(FIELDS)]) for form in value.logical_forms]
+    book = read_workbook(export_workbook(results))
+    assert [(r["form_id"], r["commitment_numbers"]) for r in book["Forms"][1]] == [
+        ("form-1", "0002"), ("form-1", "0001"), ("form-2", "0002")]
+    assert len(book["ReviewAudit"][1]) == 14
+
+
+def test_blank_commitment_preserves_actual_review_states_without_inventing_approval():
+    unresolved = reviewed()
+    blank = reviewed(actions=[action(name="commitment_numbers", kind="acknowledge_blank", values=())])
+    for result, status in [(unresolved, "unreviewed"), (blank, "acknowledged_blank")]:
+        rows = read_workbook(export_workbook([result]))["Forms"][1]
+        assert len(rows) == 1 and rows[0]["commitment_numbers"] == ""
+        assert rows[0]["commitment_numbers_review_status"] == status
+        assert rows[0]["record_review_status"] == "unresolved"
+    value = canonical()
+    actions = [action(value, name=name, kind="acknowledge_blank" if name == "commitment_numbers" else "approve_as_extracted",
+                      values=() if name == "commitment_numbers" else None, revision=i, decision_id=f"blank-{i}")
+               for i, name in enumerate(FIELDS)]
+    complete_blank = reviewed(value, actions)
+    row = read_workbook(export_workbook([complete_blank]))["Forms"][1][0]
+    assert row["commitment_numbers"] == "" and row["record_review_status"] == "complete"
+    assert row["commitment_numbers_value_source"] == "human_approved_blank"
+
+
+@pytest.mark.parametrize("value", ["=1+1", "+000123", "-000123", "@SUM(A1)", " 0007 ", "https://example.invalid"])
+def test_expanded_commitment_cells_are_literal_exact_strings(value):
+    rows = read_workbook(export_workbook([commitment_record([value, "0002"])]))["Forms"][1]
+    assert [row["commitment_numbers"] for row in rows] == [value, "0002"]
+
+
+def test_existing_stored_v1_projection_reopens_and_exports_without_changing_snapshot_or_audit():
+    from backend.persistence import business_codec as codec
+    from backend.services.business_review import BusinessReviewResult
+
+    legacy = complete()  # Its original prompt/provenance is intentionally not current.
+    stored = codec.encode(legacy)
+    reopened = codec.decode(stored, BusinessReviewResult)
+    book = read_workbook(export_workbook([reopened]))
+    assert [row["commitment_numbers"] for row in book["Forms"][1]] == ["00001", "00002"]
+    assert len(book["ReviewAudit"][1]) == 7
+    assert codec.encode(reopened) == stored and reopened == legacy

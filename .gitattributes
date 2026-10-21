@@ -1,1 +1,20 @@
-*.pdf binary
+# Portable source checkouts and Git blobs, independent of core.autocrlf.
+* text=auto eol=lf
+
+# Binary assets must never undergo end-of-line conversion or text merging.
+*.pdf binary -text
+*.png binary -text
+*.jpg binary -text
+*.jpeg binary -text
+*.gif binary -text
+*.webp binary -text
+*.ico binary -text
+*.zip binary -text
+*.gz binary -text
+*.7z binary -text
+*.xlsx binary -text
+*.xls binary -text
+*.woff binary -text
+*.woff2 binary -text
+*.ttf binary -text
+*.otf binary -text
