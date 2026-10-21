@@ -31,11 +31,13 @@ services:
         sync: false
       - key: DEMO_PASSWORD_HASH
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
       - key: AI_OUTBOUND_ENABLED
-        value: "false"
+        value: "true"
       - key: ALLOW_EXTERNAL_PHI
-        value: "false"
+        value: "true"
       - key: APPROVED_AI_PROVIDERS
-        value: ""
+        value: gemini
       - key: DEFAULT_EXTRACTION_ADAPTER
-        value: local_ocr
+        value: gemini

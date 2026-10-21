@@ -14,6 +14,13 @@ function fixture(): DemoRun {
         reviewed_values: [], review_status: "unreviewed" })) } };
 }
 
+test("public demo warns against patient documents and never preselects external AI consent", () => {
+  const app = appHarness();
+  assert.match(text(app.tree), /אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי/);
+  assert.match(text(app.tree), /Gemini/);
+  assert.equal(app.nodes().find(n => n.props["aria-label"] === "אישור עיבוד חיצוני לכל הקבצים")!.props.checked, false);
+});
+
 test("RTL shell navigates without discarding the active unsaved review or posting new extraction", async () => {
   const original = globalThis.fetch; const calls: string[] = [];
   globalThis.fetch = async (input, options) => {

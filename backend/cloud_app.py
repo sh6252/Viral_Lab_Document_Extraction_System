@@ -1,6 +1,5 @@
 """Explicit single-origin invited-judge ASGI factory. Never imports local launchers."""
 from contextlib import asynccontextmanager
-from hashlib import sha256
 import hmac
 import json
 import os
@@ -77,16 +76,9 @@ class CloudBusinessRoute(APIRoute):
 
 
 class CloudWorkflow(DurableWorkflow):
-    def __init__(self, config: AppConfig, adapter: ExtractionAdapter | None, repository: BusinessRepository,
-                 *, allowed_hashes: frozenset[str]):
+    def __init__(self, config: AppConfig, adapter: ExtractionAdapter | None, repository: BusinessRepository):
         super().__init__(config, adapter, repository)
-        self.allowed_hashes = allowed_hashes
         self.max_snapshot_bytes = 64 * 1024
-
-    def create(self, content: bytes, mime_type: str, allow_external_processing: bool, locale: str) -> dict:
-        if sha256(content).hexdigest() not in self.allowed_hashes:
-            raise DemoError("SYNTHETIC_DOCUMENT_NOT_ALLOWLISTED", 403)
-        return super().create(content, mime_type, allow_external_processing, locale)
 
 
 class BodyTooLarge(Exception):
@@ -288,8 +280,7 @@ def create_cloud_app() -> FastAPI:
             raise ValueError("UNSUPPORTED_CLOUD_PROVIDER")
         adapter = GeminiExtractionAdapter(config=config, max_document_bytes=config.max_upload_bytes,
             timeout_seconds=45, max_retries=0, client_factory=_one_attempt_client) if provider == "gemini" else None
-        workflow = CloudWorkflow(config, adapter, BusinessRepository(engine, capacity_limits=(30, 32 * 1024 * 1024)),
-                                 allowed_hashes=cloud.allowed_document_hashes)
+        workflow = CloudWorkflow(config, adapter, BusinessRepository(engine, capacity_limits=(30, 32 * 1024 * 1024)))
         directory = Path(__file__).resolve().parents[1] / "frontend/dist"
         if not (directory / "index.html").is_file():
             raise ValueError("FRONTEND_BUILD_REQUIRED")

@@ -556,8 +556,8 @@ export default function App() {
                 </label>
               </div>
               <div className="upload-actions"><span className="mini-heading"><Icon name="shield" size={18} />לפני שמתחילים</span>
-                <p>החילוץ נעשה באמצעות ספק חיצוני. יש לשלוח רק מסמך שהתקבל אישור לעבדו.</p>
-                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש להעביר את כל המסמכים שנבחרו ל־<bdi dir="ltr">Gemini</bdi>, בהתאם להרשאה לכל מסמך.</span></label>
+                <p role="note">הדגמה ציבורית למסמכים סינתטיים בלבד. אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי. הקבצים יישלחו ל־Gemini רק לאחר הסכמה מפורשת.</p>
+                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש להעביר את כל המסמכים שנבחרו ל־<bdi dir="ltr">Gemini</bdi>, ומאשר/ת שהם סינתטיים וללא מידע רפואי אישי.</span></label>
                 <button className="button button-primary upload-button" onClick={upload} disabled={!file || !consent || !uploadQueue.some(item => item.status === "queued") || busy || !!pending || !!pendingFinal}><Icon name="upload" size={18} />העלאה וחילוץ<Icon name="arrow" size={17} /></button>
                 <small>ללא ניסיון חוזר אוטומטי. ביקורת וייצוא אינם מפעילים חילוץ נוסף.</small>
               </div>

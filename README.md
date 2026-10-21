@@ -7,14 +7,20 @@ Central Virology Laboratory document extraction system.
 The selected cloud setup now uses **one Render Free Web Service** serving the
 built React app and authenticated FastAPI API at the same HTTPS origin, plus a
 new synthetic-only Neon database. This avoids third-party cookie dependence.
-`render.yaml` prepares the build/start settings; nothing has been committed,
-pushed, migrated to Neon or deployed by this task. See the current
+`render.yaml` prepares the build/start settings. The user reports a live Render
+site and provisioned Neon runtime; this update makes no Neon changes or manual
+deployments. See the current
 [Hebrew Render/Neon checklist](docs/release/RENDER_NEON_HE.md).
 The loopback-only launchers retain their original security guards. There is
-still no truthful durable synthetic replay seeder or implemented local OCR;
-uploads in cloud require an explicit synthetic-document SHA-256 allowlist and
-an actually available, separately authorized extraction provider. No mock is
-silently substituted for Gemini. The earlier release/VM reports below are historical.
+still no truthful durable synthetic replay seeder or implemented local OCR.
+The approved cloud configuration selects the existing Gemini adapter for any
+supported PDF/PNG/JPEG up to 5 MiB, with authentication, CSRF and explicit
+per-file external-processing consent. There is no document SHA-256 allowlist.
+Use synthetic documents only: never upload real patient documents or personal
+medical information. Set the backend-only Gemini secret and four policy flags
+listed in the checklist; keep the existing model configuration. Local AI defaults
+remain disabled. No mock is silently substituted for Gemini, and human review
+remains mandatory. The earlier release/VM reports below are historical.
 
 ## Integrated submission candidate — 21 October 2026
 

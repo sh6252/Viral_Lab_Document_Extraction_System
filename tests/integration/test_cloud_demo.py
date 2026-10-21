@@ -1,5 +1,4 @@
 """Real isolated PostgreSQL through the authenticated cloud ASGI boundary."""
-from hashlib import sha256
 
 from fastapi.testclient import TestClient
 import pytest
@@ -25,10 +24,10 @@ def readiness(engine):
 
 
 def cloud(engine, *, capacity=(100, 64 * 1024 * 1024)):
-    config = CloudConfig(ORIGIN, PASSWORD_HASH, "submission_synthetic", frozenset({sha256(PDF).hexdigest()}))
+    config = CloudConfig(ORIGIN, PASSWORD_HASH, "submission_synthetic")
     provider = Adapter(result=clean_result())
     workflow = CloudWorkflow(AppConfig(max_upload_bytes=5 * 1024 * 1024), provider,
-        BusinessRepository(engine, capacity_limits=capacity), allowed_hashes=config.allowed_document_hashes)
+        BusinessRepository(engine, capacity_limits=capacity))
     app = create_cloud_application(config, workflow, readiness(engine))
     client = TestClient(app, base_url=ORIGIN, headers={"Origin": ORIGIN, "X-Demo-Request": "1"})
     return client, provider

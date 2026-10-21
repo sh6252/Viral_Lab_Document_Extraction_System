@@ -44,14 +44,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
   return <>
     <aside className="demo-access" dir="rtl">
-      <span>הדגמה למוזמנים · מסמכים סינתטיים שאושרו מראש בלבד</span>
+      <span>הדגמה למוזמנים · מסמכים סינתטיים בלבד</span>
       {authenticated && <button onClick={() => void logout()}>התנתקות</button>}
       {authenticated && error && <span role="alert">{error}</span>}
     </aside>
     {mounted && <div hidden={!authenticated}>{children}</div>}
     {!authenticated && <main className="demo-login" dir="rtl">
       <h1>מחויבים ל־100</h1><h2>כניסת שופטים ומוזמנים</h2>
-      <p>הזינו את הסיסמה שקיבלתם ממארגן ההדגמה. אין להעלות מידע רפואי אמיתי.</p>
+      <p>הזינו את הסיסמה שקיבלתם ממארגן ההדגמה. אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי. חילוץ באמצעות Gemini מחייב הסכמה מפורשת.</p>
       <form onSubmit={event => void login(event)}>
         <label htmlFor="demo-password">סיסמת הזמנה</label>
         <input id="demo-password" type="password" autoComplete="current-password" maxLength={256}

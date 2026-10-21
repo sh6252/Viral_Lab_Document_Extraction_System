@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from unittest.mock import Mock
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 import pytest
@@ -15,18 +16,29 @@ from backend.core.demo_auth import COOKIE, DemoAuth, hash_password
 from backend.persistence.business_repository import BusinessRepository
 from backend.persistence.cloud_database import neon_url
 from backend.services.extraction.errors import ProviderRateLimit, ProviderTimeout, ProviderUnavailable
+from backend.services.extraction.gemini_adapter import GeminiExtractionAdapter
+from tests.test_gemini_adapter import _FakeClient, _FakeResponse, _StatusError
 from tests.test_demo_api import Adapter, BASE, command
 from tests.test_excel_export import read_workbook
 from tests.test_form_approval import clean_result, finalize_command
 
 ORIGIN = "https://judges.example.test"
 PASSWORD = "synthetic-invitation-password-only"
-PDF = b"%PDF-1.7 synthetic allowlisted only"
+PDF = b"%PDF-1.7 synthetic test document"
 PASSWORD_HASH = hash_password(PASSWORD)
 
 
-def setup_cloud(adapter=None, *, ready=None, auth=None, static_directory=None, origin=ORIGIN):
-    config = CloudConfig(origin, PASSWORD_HASH, "submission_synthetic", frozenset({sha256(PDF).hexdigest()}))
+@pytest.fixture(autouse=True)
+def no_external_connections(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Cloud regression tests must never connect to Gemini or a database")
+    monkeypatch.setattr("backend.cloud_app.create_cloud_engine", forbidden)
+    monkeypatch.setattr("backend.cloud_app._one_attempt_client", forbidden)
+    monkeypatch.setattr(GeminiExtractionAdapter, "_create_google_client", staticmethod(forbidden))
+
+
+def setup_cloud(adapter=None, *, ready=None, auth=None, static_directory=None, origin=ORIGIN, app_config=None):
+    config = CloudConfig(origin, PASSWORD_HASH, "submission_synthetic")
     repository = Mock(spec=BusinessRepository)
     saved = {}
     repository.create.side_effect = lambda run: saved.setdefault(run.run_id, run)
@@ -39,8 +51,7 @@ def setup_cloud(adapter=None, *, ready=None, auth=None, static_directory=None, o
     repository.finalize_atomic.side_effect = transition
     repository.list_records.return_value = {"items": [], "total": 0, "offset": 0, "limit": 20}
     provider = adapter or Adapter(result=clean_result())
-    workflow = CloudWorkflow(AppConfig(max_upload_bytes=5 * 1024 * 1024), provider, repository,
-                             allowed_hashes=config.allowed_document_hashes)
+    workflow = CloudWorkflow(app_config or AppConfig(max_upload_bytes=5 * 1024 * 1024), provider, repository)
     readiness = ready or Mock()
     app = create_cloud_application(config, workflow, readiness, auth=auth, static_directory=static_directory)
     client = TestClient(app, base_url=ORIGIN, headers={"Origin": ORIGIN, "X-Demo-Request": "1"})
@@ -54,9 +65,9 @@ def login(client):
     return response
 
 
-def upload(client, content=PDF):
-    return client.post(BASE, files={"file": ("synthetic.pdf", content, "application/pdf")},
-                       data={"allow_external_processing": "true"})
+def upload(client, content=PDF, *, mime="application/pdf", consent=True):
+    return client.post(BASE, files={"file": ("synthetic", content, mime)},
+                       data={"allow_external_processing": str(consent).lower()})
 
 
 @pytest.mark.parametrize("method,path", [("get", "/api/v1/business-records"), ("post", BASE),
@@ -133,10 +144,9 @@ def test_expiry_revocation_rate_limit_and_restart_fail_closed():
     assert new_client.get("/api/v1/auth/session").status_code == 401
 
 
-def test_allowlist_stream_limits_and_readiness_prevent_provider_or_database_writes():
+def test_stream_limits_and_readiness_prevent_provider_or_database_writes():
     client, provider, repository, _ = setup_cloud()
     login(client)
-    assert upload(client, b"%PDF-1.7 unapproved document").status_code == 403
     response = client.post("/api/v1/business-records/export.xlsx", content=iter([b"x" * 70000, b"y" * 70000]),
                            headers={"Content-Type": "application/json"})
     assert response.status_code == 413
@@ -221,7 +231,7 @@ def test_neon_driver_and_tls_parameters_preserved():
     "https://user:password@example.test", "https://*.example.test", "https://example.test:0"])
 def test_cloud_origin_must_be_an_exact_https_origin(origin):
     with pytest.raises(ValueError):
-        CloudConfig(origin, PASSWORD_HASH, "submission_synthetic", frozenset())
+        CloudConfig(origin, PASSWORD_HASH, "submission_synthetic")
 
 
 def test_cloud_environment_is_explicit_and_accepts_trusted_render_origin(monkeypatch):
@@ -233,7 +243,8 @@ def test_cloud_environment_is_explicit_and_accepts_trusted_render_origin(monkeyp
     monkeypatch.setenv("DEMO_DATA_POLICY", "synthetic-only")
     monkeypatch.setenv("DEMO_PASSWORD_HASH", PASSWORD_HASH)
     monkeypatch.setenv("DEMO_DATABASE_NAME", "submission_synthetic")
-    monkeypatch.setenv("DEMO_ALLOWED_DOCUMENT_SHA256", "")
+    # Obsolete environment values cannot restrict otherwise valid uploads.
+    monkeypatch.setenv("DEMO_ALLOWED_DOCUMENT_SHA256", "obsolete-and-ignored")
     monkeypatch.setenv("RENDER_EXTERNAL_URL", ORIGIN)
     assert CloudConfig.from_env().origin == ORIGIN
     monkeypatch.setenv("DEMO_DATABASE_NAME", "viral_lab")
@@ -272,3 +283,122 @@ def test_malformed_security_headers_are_denied_without_unhandled_exceptions():
     assert client.post("/api/v1/auth/logout", headers={"X-Demo-CSRF": b"\xff"}).status_code == 403
     response = client.post("/api/v1/business-records/export.xlsx", content=b"{}", headers={"Content-Length": "9" * 5000})
     assert response.status_code == 413
+
+
+def gemini_cloud(*, config=None, errors=None):
+    config = config or AppConfig(ai_outbound_enabled=True, allow_external_phi=True,
+        approved_ai_providers=("gemini",), default_extraction_adapter="gemini",
+        gemini_api_key="synthetic-offline-key", max_upload_bytes=5 * 1024 * 1024)
+    # Real adapter/canonical conversion; only the SDK transport is fake.
+    payload = {"logical_forms": [{"form_id": "form-1", "fields": clean_result().logical_forms[0].fields.model_dump(mode="json")} ]}
+    sdk = _FakeClient(*(errors if errors is not None else [_FakeResponse(payload) for _ in range(3)]))
+    adapter = GeminiExtractionAdapter(config=config, max_document_bytes=config.max_upload_bytes,
+        max_retries=0, client_factory=lambda *_: sdk)
+    return (*setup_cloud(adapter, app_config=config), sdk)
+
+
+def test_arbitrary_pdf_png_jpeg_each_use_gemini_then_review_reopen_and_bulk_export(monkeypatch):
+    monkeypatch.setenv("DEMO_ALLOWED_DOCUMENT_SHA256", "obsolete-value-must-not-restrict-files")
+    client, _, _, saved, sdk = gemini_cloud()
+    login(client)
+    documents = [(b"%PDF-1.7 arbitrary synthetic PDF", "application/pdf"),
+                 (b"\x89PNG\r\n\x1a\narbitrary synthetic PNG", "image/png"),
+                 (b"\xff\xd8\xffarbitrary synthetic JPEG", "image/jpeg")]
+    runs = []
+    for content, mime in documents:
+        response = upload(client, content, mime=mime)
+        assert response.status_code == 201
+        run = response.json()
+        assert run["provider"] == "gemini" and run["model"] == AppConfig().gemini_model
+        assert run["status"] == "succeeded" and run["selected_form"]["finalized"] is False
+        assert run["selected_form"]["automatic_acceptance"] is False
+        assert saved[run["run_id"]].source_sha256 == sha256(content).hexdigest()
+        assert client.get(f"{BASE}/{run['run_id']}/source").content == content
+        runs.append(run)
+    assert len({r["run_id"] for r in runs}) == 3 and len(sdk.calls) == 3
+    assert [call["contents"][0].inline_data.mime_type for call in sdk.calls] == [mime for _, mime in documents]
+    first = runs[0]
+    reviewed = client.post(f"{BASE}/{first['run_id']}/forms/form-1/review", json=command(first))
+    assert reviewed.status_code == 200
+    final = client.post(f"{BASE}/{first['run_id']}/forms/form-1/finalize", json=finalize_command(reviewed.json()))
+    assert final.status_code == 200 and final.json()["selected_form"]["finalized"] is True
+    runs[0] = final.json()
+    assert client.get(f"{BASE}/{first['run_id']}").json()["selected_form"]["finalized"] is True
+    selection = {"forms": [{"run_id": r["run_id"], "form_id": "form-1", "review_token": r["review_token"],
+        "expected_revision": r["selected_form"]["revision"], "commitments": ["00001", "00002"]} for r in runs]}
+    exported = client.post("/api/v1/business-records/export.xlsx", json=selection)
+    assert exported.status_code == 200 and len(read_workbook(exported.content)["Forms"][1]) == 6
+    assert len(sdk.calls) == 3  # Review/reopen/export do not send documents again.
+
+
+def test_gemini_requires_authentication_csrf_and_explicit_per_document_consent():
+    client, _, repository, _, sdk = gemini_cloud()
+    assert upload(client).status_code == 401
+    repository.create.assert_not_called()
+    login(client)
+    assert upload(client, consent=False).status_code == 403
+    assert not sdk.calls
+    assert client.post(BASE, files={"file": ("test.pdf", PDF, "application/pdf")}).status_code == 403
+    assert not sdk.calls
+    assert client.post(BASE, headers={"X-Demo-CSRF": "wrong"}, files={"file": ("test.pdf", PDF, "application/pdf")},
+                       data={"allow_external_processing": "true"}).status_code == 403
+    assert not sdk.calls
+
+
+@pytest.mark.parametrize("flag,value,code", [("ai_outbound_enabled", False, "PROVIDER_NOT_AUTHORIZED"),
+    ("allow_external_phi", False, "PROVIDER_NOT_AUTHORIZED"), ("approved_ai_providers", (), "PROVIDER_NOT_AUTHORIZED"),
+    ("gemini_api_key", None, "MISSING_PROVIDER_CREDENTIALS")])
+def test_gemini_configuration_policy_gates_remain_fail_closed(flag, value, code):
+    config = AppConfig(ai_outbound_enabled=True, allow_external_phi=True, approved_ai_providers=("gemini",),
+                       gemini_api_key="synthetic-offline-key", max_upload_bytes=5 * 1024 * 1024)
+    client, _, _, _, sdk = gemini_cloud(config=replace(config, **{flag: value}))
+    login(client)
+    response = upload(client)
+    assert response.json()["failure"]["code"] == code and response.json()["selected_form"] is None
+    assert not sdk.calls
+
+
+@pytest.mark.parametrize("error,status", [(_StatusError(429), 429), (_StatusError(503), 503), (TimeoutError("synthetic"), 504)])
+def test_real_gemini_adapter_errors_are_preserved_without_retry_or_fallback(error, status):
+    client, _, _, _, sdk = gemini_cloud(errors=[error])
+    login(client)
+    response = upload(client)
+    assert response.status_code == status and response.json()["status"] == "failed"
+    assert response.json()["selected_form"] is None and len(sdk.calls) == 1
+    assert "SECRET_TEST_KEY" not in response.text
+
+
+@pytest.mark.parametrize("content,mime", [(b"not a document", "application/pdf"), (PDF, "image/png"),
+    (b"\x89PNG\r\n\x1a\n" + b"x" * (5 * 1024 * 1024), "image/png")],
+    ids=["invalid-signature", "mime-mismatch", "oversize"])
+def test_removing_hash_allowlist_does_not_bypass_file_validation_or_size(content, mime):
+    client, _, repository, _, sdk = gemini_cloud()
+    login(client)
+    assert upload(client, content, mime=mime).status_code in {413, 415}
+    assert not sdk.calls
+    repository.create.assert_not_called()
+
+
+def test_production_factory_selects_existing_gemini_adapter_and_configured_model(monkeypatch, tmp_path):
+    from backend import cloud_app
+    for name, value in {"APP_DEPLOYMENT": "cloud", "DEMO_DATA_POLICY": "synthetic-only", "DEMO_PUBLIC_ORIGIN": ORIGIN,
+        "DEMO_PASSWORD_HASH": PASSWORD_HASH, "DEMO_DATABASE_NAME": "submission_synthetic", "MAX_UPLOAD_BYTES": "5242880",
+        "DEFAULT_EXTRACTION_ADAPTER": "gemini", "AI_OUTBOUND_ENABLED": "true", "ALLOW_EXTERNAL_PHI": "true",
+        "APPROVED_AI_PROVIDERS": "gemini", "GEMINI_API_KEY": "synthetic-offline-key", "GEMINI_MODEL": "existing-configured-model"}.items():
+        monkeypatch.setenv(name, value)
+    directory = tmp_path / "frontend" / "dist"
+    directory.mkdir(parents=True)
+    (directory / "index.html").write_text("synthetic factory test")
+    monkeypatch.setattr(cloud_app, "__file__", str(tmp_path / "backend" / "cloud_app.py"))
+    engine = Mock()
+    engine.dialect.name = "postgresql"
+    monkeypatch.setattr(cloud_app, "create_cloud_engine", Mock(return_value=engine))
+    factory = Mock(side_effect=AssertionError("Factory startup must never call Gemini"))
+    monkeypatch.setattr(cloud_app, "_one_attempt_client", factory)
+    app = cloud_app.create_cloud_app()
+    workflow = app.state.demo_workflow
+    assert isinstance(workflow.adapter, GeminiExtractionAdapter)
+    assert workflow.adapter._config.gemini_model == "existing-configured-model"
+    assert workflow.adapter._max_retries == 0 and workflow.config.max_upload_bytes == 5 * 1024 * 1024
+    factory.assert_not_called()
+    engine.connect.assert_not_called()
