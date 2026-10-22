@@ -37,6 +37,7 @@ def test_provider_status_and_client_timeout_are_distinct_and_safe(caplog, error,
         assert detail["timeout_phase"] == "connect"
     if provider_http == 504:
         assert detail["timeout_phase"] == "provider_deadline"
+        assert detail["provider_status"] == "DEADLINE_EXCEEDED"
     assert detail["request_id"] == response.headers["x-request-id"]
     assert detail["elapsed_ms"] >= 0 and len(sdk.calls) == 1
     assert "SECRET_TEST_KEY" not in caplog.text + response.text
@@ -124,15 +125,16 @@ def test_google_sdk_errors_expose_only_allowlisted_status_and_preserve_504():
     assert "SECRET_RAW_RESPONSE" not in json.dumps(safe)
 
 
-def test_cloud_sdk_timeout_is_milliseconds_and_retries_remain_bounded(monkeypatch):
+@pytest.mark.parametrize("timeout", [30, 90, 120])
+def test_cloud_sdk_timeout_is_milliseconds_and_retries_remain_bounded(monkeypatch, timeout):
     from unittest.mock import Mock
     from google import genai
     from backend.cloud_app import _one_attempt_client
     factory = Mock()
     monkeypatch.setattr(genai, "Client", factory)
-    _one_attempt_client("synthetic-offline-key", 45)
+    _one_attempt_client("synthetic-offline-key", timeout)
     options = factory.call_args.kwargs["http_options"]
-    assert options.timeout == 45000 and options.retry_options.attempts == 1
+    assert options.timeout == timeout * 1000 and options.retry_options.attempts == 1
 
 
 def test_client_initialization_failure_has_safe_specific_stage(caplog):

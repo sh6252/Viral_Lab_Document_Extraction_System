@@ -380,8 +380,15 @@ def test_removing_hash_allowlist_does_not_bypass_file_validation_or_size(content
     repository.create.assert_not_called()
 
 
-def test_production_factory_selects_existing_gemini_adapter_and_configured_model(monkeypatch, tmp_path):
+@pytest.mark.parametrize("timeout", [None, "30", "90", "120"])
+def test_production_factory_selects_existing_gemini_adapter_and_configured_model(monkeypatch, tmp_path, timeout, caplog):
+    import json
+    import logging
     from backend import cloud_app
+    caplog.set_level(logging.INFO, logger="uvicorn.error")
+    monkeypatch.delenv("GEMINI_TIMEOUT_SECONDS", raising=False)
+    if timeout is not None:
+        monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", timeout)
     for name, value in {"APP_DEPLOYMENT": "cloud", "DEMO_DATA_POLICY": "synthetic-only", "DEMO_PUBLIC_ORIGIN": ORIGIN,
         "DEMO_PASSWORD_HASH": PASSWORD_HASH, "DEMO_DATABASE_NAME": "submission_synthetic", "MAX_UPLOAD_BYTES": "5242880",
         "DEFAULT_EXTRACTION_ADAPTER": "gemini", "AI_OUTBOUND_ENABLED": "true", "ALLOW_EXTERNAL_PHI": "true",
@@ -401,5 +408,25 @@ def test_production_factory_selects_existing_gemini_adapter_and_configured_model
     assert isinstance(workflow.adapter, GeminiExtractionAdapter)
     assert workflow.adapter._config.gemini_model == "existing-configured-model"
     assert workflow.adapter._max_retries == 0 and workflow.config.max_upload_bytes == 5 * 1024 * 1024
+    expected_timeout = int(timeout or "120")
+    assert workflow.adapter._timeout_seconds == expected_timeout
+    messages = [json.loads(record.message) for record in caplog.records if record.name == "uvicorn.error"]
+    assert messages[-1]["sdk_timeout_ms"] == expected_timeout * 1000
+    assert messages[-1]["sdk_attempts"] == 1 and messages[-1]["adapter_retries"] == 0
     factory.assert_not_called()
     engine.connect.assert_not_called()
+
+
+@pytest.mark.parametrize("timeout", ["", "secret-invalid-value", "1.5", "29", "121", "-1"])
+def test_cloud_timeout_invalid_environment_is_rejected_safely(monkeypatch, timeout):
+    monkeypatch.setenv("APP_DEPLOYMENT", "cloud")
+    monkeypatch.setenv("DEMO_DATA_POLICY", "synthetic-only")
+    monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", timeout)
+    with pytest.raises(ValueError, match="^GEMINI_TIMEOUT_SECONDS_MUST_BE_INTEGER_30_TO_120$"):
+        CloudConfig.from_env()
+
+
+@pytest.mark.parametrize("timeout", [29, 121, True, 90.5])
+def test_cloud_timeout_direct_configuration_cannot_bypass_bounds(timeout):
+    with pytest.raises(ValueError, match="^GEMINI_TIMEOUT_SECONDS_MUST_BE_INTEGER_30_TO_120$"):
+        CloudConfig(ORIGIN, PASSWORD_HASH, "submission_synthetic", timeout)

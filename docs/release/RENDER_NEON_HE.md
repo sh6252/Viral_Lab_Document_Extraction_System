@@ -8,11 +8,11 @@
 
 ## אבחון 503/504 — פרסום מקור אושר; פריסה דורשת פעולה נפרדת
 
-המשתמש דיווח על `failure.code=PROVIDER_UNAVAILABLE`, עם `retryable=true`.
-זו תגובת יישום לאחר שמירת כשל; במסלול זה readiness, יצירת מסמך ושמירת
-הכשל כבר הושלמו. אין בכך הוכחה ל־503 מהספק: הגרסה הקודמת סיווגה גם HTTP
-504 של הספק כ־PROVIDER_UNAVAILABLE/503. באג סיווג זה תוקן; סיבת הכשל החי
-עדיין אינה מוכחת, כי אין HTTP status פנימי, שלב וזמן מהגרסה החיה הישנה.
+בעקבות תיקון האבחון המשתמש דיווח מהאתר החי על `PROVIDER_TIMEOUT`, עם
+`stage=provider_request`, `failure_kind=provider_http`, HTTP פנימי 504,
+`provider_status=DEADLINE_EXCEEDED`, `timeout_phase=provider_deadline`
+ו־`elapsed_ms=44289`. זה מאמת deadline מהספק, לא כשל readiness או timeout
+מקומי של הלקוח. עדיין אין הוכחה שהגדלת timeout הלקוח תפתור deadline פנימי בספק.
 
 המסלול: שער התחברות/CSRF → schema readiness → בדיקת קובץ →
 `run_in_threadpool(CloudWorkflow.create)` → transaction של יצירת מסמך →
@@ -22,11 +22,17 @@ transaction של completion → תגובת HTTP. חיבור PostgreSQL אינו 
 העיבוד סינכרוני ביחס לבקשת ההעלאה, אך אינו רץ על event loop. בדיקה באותה
 לולאה מאמתת ש־health ממשיך לענות ושהעלאה נוספת מקבלת 429 בזמן ספק ממתין.
 
-מגבלת ה־SDK נשארה 45,000 מילישניות, adapter retries=0 ו־SDK attempts=1.
+לבדיקה מבוקרת מגבלת ה־SDK בענן הוגדלה מ־45,000 ל־120,000 מילישניות.
+`GEMINI_TIMEOUT_SECONDS` הוא משתנה Backend אופציונלי: מספר שלם בין 30 ל־120,
+ברירת מחדל 120. ערך לא תקין מונע startup בלי להדפיס את הערך. ההגדרה עוברת
+מה־CloudConfig למתאם ול־google-genai במילישניות, וגם ללוג ההגדרות הבטוח.
+adapter retries=0 ו־SDK attempts=1 נשמרו: ניסיון יחיד בלבד.
 זהו timeout של לקוח HTTP, לא deadline כולל ל־upload+DB+generation, ולא
 הגדרת timeout של Render. אין timeout עצמאי ב־fetch של הממשק ואין כאן
-Gunicorn; `--workers 1` אינו כשלעצמו הסבר ל־504. לא הוגדלו timeouts ולא
-נוספו retries או מעבר מודל. `gemini-3.8-flash` נשאר. לפי [מדריך ההגירה הרשמי](https://ai.google.dev/gemini-api/docs/whats-new-gemini-3.8),
+Gunicorn; `--workers 1` אינו כשלעצמו הסבר ל־504. לפי [התיעוד הרשמי של Render](https://render.com/docs/render-vs-heroku-comparison),
+תגובות HTTP יכולות להימשך עד 100 דקות; 120 שניות אינן חורגות ממגבלה זו.
+ניתוק דפדפן/סינון/רשת, restart או deadline פנימי של הספק עדיין עלולים לקטוע בקשה.
+לא נוספו retries או מעבר מודל. `gemini-3.8-flash` נשאר. לפי [מדריך ההגירה הרשמי](https://ai.google.dev/gemini-api/docs/whats-new-gemini-3.8),
 הוסרה רק שליחת `temperature=0` למודל זה; מודלים אחרים שומרים על התנהגותם.
 זו התאמת API, לא הוכחה לסיבת 503 ולא טענה לשיפור דיוק. JSON mode נשאר,
 ו־schema generation מופעל רק אם דגל הניסוי הקיים הוגדר. לא בוצעה הערכת
@@ -66,7 +72,13 @@ baseline/holdout חיה; אין לטעון לשימור איכות ללא השו
    [מגבלות Render Free](https://render.com/docs/free); לא אומת אירוע כזה באתר החי.
 
 רק לאחר אישור קוד ו־commit/push, המשתמש יבחר פריסה ידנית של ה־commit
-המאושר. אין צורך לשנות Neon, מפתח או timeout. לאחר קריאת לוג ההגדרות,
+המאושר. אין צורך לשנות Neon או מפתח. אפשר להגדיר ב־Backend בלבד
+`GEMINI_TIMEOUT_SECONDS=120`, או להשאיר את המשתנה חסר כדי לקבל אותה ברירת מחדל.
+לא שונה `render.yaml`; אין שינוי Blueprint לסנכרון. להשאיר Auto Deploy כבוי
+ו־Blueprint Auto Sync=No; הודעת ה־commit כוללת `[skip render]`.
+לאחר פריסה ידנית של ה־commit החדש, לוודא `sdk_timeout_ms=120000`,
+`adapter_retries=0`, `sdk_attempts=1` בלוג `cloud_extraction_config`.
+לאחר קריאת לוג ההגדרות,
 לבצע בדיקה מורשית עם קובץ סינתטי אחד ואז כמה קבצים נפרדים, ולבדוק בידוד
 כשל, ביקורת, אישור אנושי ו־XLSX. אם נמדד timeout מקומי בספק: לשקול שינוי
 thinking level או deadline רק כמשימה מדודה ומאושרת, ולא להוסיף retry עיוור.
@@ -98,8 +110,8 @@ commit או push. בהמשך אושר פרסום המקור לאחר סקירה 
 הרשימה השמורה אינה נתמכת במצב זה. ב־local_demo כשל ספק חוזר כתגובה 201 עם
 `status=failed` ו־`failure.code`; במצב cloud הוא מתורגם ל־503/504 מתאים.
 לכן אין להסיק הצלחה מ־HTTP 201 בלבד. אין fallback לתוצאה מדומה.
-המשגר המקומי משתמש ב־SDK timeout של 60 שניות, לעומת 45 בענן; הצלחה
-מקומית לבדה אינה מוכיחה שהכשל בענן נפתר. לא שינינו הגבלות זמן אלו.
+המשגר המקומי משתמש ב־SDK timeout של 60 שניות, לעומת ברירת מחדל 120 בענן;
+ההגדרה החדשה היא לענן בלבד. הצלחה מקומית לבדה אינה מוכיחה שהכשל בענן נפתר.
 
 נוספה בדיקה המפעילה את **המשגר המקומי האמיתי ומתאם Gemini עם SDK מדומה**:
 רשימה נדחית, חילוץ מצליח, ביקורת ו־XLSX עובדים, והרשימה עדיין נדחית. אין
