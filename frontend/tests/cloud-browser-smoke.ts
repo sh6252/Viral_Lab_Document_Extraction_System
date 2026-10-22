@@ -2,7 +2,7 @@
 // Never run against a deployed service. Certificate exceptions apply only to this fresh test profile.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,10 +72,35 @@ try {
   await cdp("Page.enable");
   await cdp("Page.navigate", { url: origin });
   await until(async () => Boolean(await evaluate("document.querySelector('#demo-password') && !document.querySelector('button[type=submit]').disabled")), "built login screen");
+  async function checkLayout(page: "login" | "workbench") {
+    for (const [label, width, height] of [["desktop", 1440, 1000], ["mobile", 390, 844]] as const) {
+      await cdp("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      await pause(100);
+      const geometry = await evaluate(`(() => {
+        const element=document.querySelector('${page === "login" ? ".auth-card" : ".page-heading"}');
+        const rect=element.getBoundingClientRect();
+        return {rtl:getComputedStyle(element).direction,overflow:document.documentElement.scrollWidth>innerWidth+1,
+          left:rect.left,right:rect.right,width:innerWidth,logo:document.querySelector('img[src="/brand.svg"]').naturalWidth>0,
+          strips:document.querySelectorAll('.demo-access,.topbar').length};
+      })()`);
+      assert.equal(geometry.rtl,"rtl"); assert.equal(geometry.overflow,false);
+      assert.ok(geometry.left>=0 && geometry.right<=geometry.width+1 && geometry.logo);
+      assert.equal(geometry.strips,0);
+      const shot=await cdp("Page.captureScreenshot",{format:"png",captureBeyondViewport:false});
+      writeFileSync(resolve(directory,`${label}-${page}.png`),Buffer.from(shot.data,"base64"));
+    }
+  }
+  assert.equal(await evaluate("document.body.textContent.includes('כניסת שופטים ומוזמנים')"),false);
+  await evaluate("document.querySelector('.password-toggle').click()");
+  await until(async () => await evaluate("document.querySelector('#demo-password').type==='text'"),"accessible password toggle");
+  await evaluate("document.querySelector('.password-toggle').click()");
+  await checkLayout("login");
   await evaluate("document.querySelector('#demo-password').focus()");
   await cdp("Input.insertText", { text: "synthetic-invitation-password-only" });
   await evaluate("document.querySelector('button[type=submit]').click()");
   await until(async () => !await evaluate("Boolean(document.querySelector('.demo-login'))"), "real first-party login");
+  assert.equal(await evaluate("document.querySelector('.page-heading .session-controls button').textContent"),"התנתקות");
+  await checkLayout("workbench");
   assert.equal(await evaluate("document.cookie.includes('__Host-viral-demo')"), false);
   const cookies = await cdp("Network.getCookies", { urls: [origin] });
   assert.ok(cookies.cookies.some((c: any) => c.name === "__Host-viral-demo" && c.secure && c.httpOnly && c.sameSite === "Strict"));
@@ -95,7 +120,8 @@ try {
   })()`);
   assert.deepEqual({ ...result, workbookBytes: 1 }, { denied: 401, blocked: 403, upload: 201, finalized: false, workbook: 200, workbookBytes: 1, logout: 200, after: 401 });
   assert.ok(result.workbookBytes > 1000);
-  console.log("PASS: built React login + real HTTPS ASGI; third-party cookies blocked; HttpOnly/Secure/Strict session; CSRF denial; synthetic upload/XLSX; logout revokes; zero database/Gemini calls.");
+  console.log("PASS: premium RTL login/workbench at desktop and mobile; no redundant strips; branded login/password toggle/header logout; real HTTPS first-party cookies, CSRF denial, synthetic upload/XLSX and logout revocation; zero database/Gemini calls.");
+  console.log(`SCREENSHOTS: ${directory}`);
 } finally {
   clearTimeout(deadline); socket?.close(); browser?.kill(); server.kill();
 }

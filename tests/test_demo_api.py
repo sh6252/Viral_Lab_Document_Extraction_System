@@ -276,3 +276,36 @@ def test_local_launcher_pins_one_adapter_and_sdk_attempt_without_policy_override
     app = create_local_demo_app()
     assert app.state.demo_workflow.adapter._max_retries == 0
     assert app.state.config.ai_outbound_enabled is False
+
+
+def test_local_records_unavailable_is_incidental_to_gemini_upload_review_and_export(monkeypatch):
+    from backend.tools import local_demo
+    from tests.test_gemini_adapter import _FakeClient, _FakeResponse, _provider_payload
+    from backend.persistence import db
+
+    def no_database(*_args, **_kwargs):
+        pytest.fail("Local in-memory extraction must never connect to PostgreSQL")
+
+    monkeypatch.setattr(db, "create_review_engine", no_database)
+    monkeypatch.delenv("REVIEW_DATABASE_DSN", raising=False)
+    for key, value in {"DEFAULT_EXTRACTION_ADAPTER": "gemini", "GEMINI_MODEL": "gemini-3.8-flash",
+        "GEMINI_API_KEY": "synthetic-offline-key", "AI_OUTBOUND_ENABLED": "true",
+        "ALLOW_EXTERNAL_PHI": "true", "APPROVED_AI_PROVIDERS": "gemini", "MAX_UPLOAD_BYTES": "5242880"}.items():
+        monkeypatch.setenv(key, value)
+    sdk = _FakeClient(_FakeResponse(_provider_payload()))
+    monkeypatch.setattr(local_demo, "_one_attempt_client", lambda *_: sdk)
+    app = local_demo.create_local_demo_app()
+    client = TestClient(app, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 50001),
+        headers={"X-Local-Demo": "1", "Origin": "http://127.0.0.1:5173"})
+    listing = client.get("/api/v1/business-records?limit=20&offset=0")
+    assert listing.status_code == 404 and listing.json()["error"]["code"] == "DURABLE_RECORDS_UNAVAILABLE"
+    response = upload(client)
+    assert response.status_code == 201
+    run = response.json()
+    assert run["status"] == "succeeded" and run["provider"] == "gemini" and run["model"] == "gemini-3.8-flash"
+    assert run["selected_form"]["finalized"] is False
+    reviewed = client.post(f"{BASE}/{run['run_id']}/forms/form-001/review", json=command(run))
+    assert reviewed.status_code == 200
+    assert client.get(f"{BASE}/{run['run_id']}/export.xlsx").status_code == 200
+    assert client.get("/api/v1/business-records").json()["error"]["code"] == "DURABLE_RECORDS_UNAVAILABLE"
+    assert len(sdk.calls) == 1  # Missing list support never disables extraction or retriggers it.

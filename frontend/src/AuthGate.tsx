@@ -11,12 +11,13 @@ async function authenticate(path: string, password?: string) {
   setCSRFToken(result.csrf_token);
 }
 
-export default function AuthGate({ children }: { children: ReactNode }) {
+export default function AuthGate({ children }: { children: (controls: ReactNode) => ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [busy, setBusy] = useState(true);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   useEffect(() => {
     let active = true;
     void authenticate("/api/v1/auth/session").then(() => {
@@ -42,23 +43,36 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     try { await request("/api/v1/auth/logout", { method: "POST" }); window.location.reload(); }
     catch { setError("ההתנתקות לא אושרה בשרת. נסו שוב."); }
   }
+  const controls = <div className="session-controls" aria-label="ניהול התחברות">
+    <span className="session-status" role="status"><span className="status-dot" />מחובר/ת</span>
+    <button className="button button-secondary" onClick={() => void logout()}>התנתקות</button>
+    {authenticated && error && <span role="alert">{error}</span>}
+  </div>;
   return <>
-    <aside className="demo-access" dir="rtl">
-      <span>הדגמה למוזמנים · מסמכים סינתטיים בלבד</span>
-      {authenticated && <button onClick={() => void logout()}>התנתקות</button>}
-      {authenticated && error && <span role="alert">{error}</span>}
-    </aside>
-    {mounted && <div hidden={!authenticated}>{children}</div>}
+    {mounted && <div hidden={!authenticated}>{children(controls)}</div>}
     {!authenticated && <main className="demo-login" dir="rtl">
-      <h1>מחויבים ל־100</h1><h2>כניסת שופטים ומוזמנים</h2>
-      <p>הזינו את הסיסמה שקיבלתם ממארגן ההדגמה. אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי. חילוץ באמצעות Gemini מחייב הסכמה מפורשת.</p>
-      <form onSubmit={event => void login(event)}>
-        <label htmlFor="demo-password">סיסמת הזמנה</label>
-        <input id="demo-password" type="password" autoComplete="current-password" maxLength={256}
-          required value={password} onChange={event => setPassword(event.target.value)} />
-        <button type="submit" disabled={busy}>{busy ? "בודקים התחברות…" : "כניסה"}</button>
-      </form>
-      {error && <p role="alert">{error}</p>}
+      <section className="auth-card" aria-labelledby="auth-title">
+        <img className="auth-logo" src="/brand.svg" width="72" height="72" alt="" aria-hidden="true" />
+        <p className="eyebrow">מהמסמך לרשומה</p>
+        <h1 id="auth-title">מחויבים ל־<bdi dir="ltr">100</bdi></h1>
+        <p className="auth-intro">כל ההתחייבויות. מבט אחד.</p>
+        <form onSubmit={event => void login(event)} aria-busy={busy}>
+          <label htmlFor="demo-password">סיסמת כניסה</label>
+          <div className="auth-password">
+            <input id="demo-password" type={showPassword ? "text" : "password"} autoComplete="current-password" maxLength={256}
+              required disabled={busy} value={password} aria-describedby={`auth-hint${error ? " auth-error" : ""}`}
+              onChange={event => setPassword(event.target.value)} />
+            <button type="button" className="password-toggle" aria-controls="demo-password" aria-pressed={showPassword}
+              aria-label={showPassword ? "הסתרת סיסמה" : "הצגת סיסמה"} onClick={() => setShowPassword(value => !value)}>
+              {showPassword ? "הסתרה" : "הצגה"}</button>
+          </div>
+          <small id="auth-hint">השתמשו בסיסמה שקיבלתם ממארגן ההדגמה.</small>
+          <button className="button button-primary auth-submit" type="submit" disabled={busy}>
+            {busy ? "בודקים התחברות…" : "כניסה לסביבת העבודה"}</button>
+        </form>
+        {error && <p id="auth-error" className="auth-error" role="alert">{error}</p>}
+        <p className="auth-safety">למסמכים סינתטיים בלבד, ללא מידע רפואי אישי.</p>
+      </section>
     </main>}
   </>;
 }

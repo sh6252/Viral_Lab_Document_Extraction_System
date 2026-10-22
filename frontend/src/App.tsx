@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { APIError, draftChanges, exportRows, fields, getRecords, getRun, getSavedSource, initialDrafts, makeCommand, postFinalization, postReview, request, savedDrafts } from "./api.ts";
 import type { Action, DemoRun, Draft, Drafts, FieldName, FinalizeCommand, RecordsFilters, RecordsPage, ReviewCommand, SavedRecord } from "./api.ts";
 import { attentionReason, commitmentRows, distinctCommitments, eligibilityKnown, exceptionQueue, fieldState, finalizationBlockers, humanApproved, matchesWorkFilter, mergeForms, needsAttention } from "./workbench.ts";
@@ -44,7 +45,7 @@ function Icon({ name, size = 20 }: { name: "upload" | "records" | "check" | "arr
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;
 }
 
-export default function App() {
+export default function App({ sessionControls }: { sessionControls?: ReactNode } = {}) {
   const [view, setView] = useState<"workspace" | "records">("workspace");
   const [dragging, setDragging] = useState(false);
   const [workForms, setWorkForms] = useState<WorkForm[]>([]);
@@ -491,14 +492,13 @@ export default function App() {
     </aside>
 
     <div className="main-shell">
-      <header className="topbar"><span><strong>מחויבים ל־<bdi dir="ltr">100</bdi></strong> <span className="breadcrumb-separator">/</span> <strong>{view === "workspace" ? "שולחן ההתחייבויות" : "רשומות שמורות"}</strong></span>
-        <span className="environment-badge"><span className="status-dot" />סביבת הדגמה מקומית</span>
-      </header>
       <main id="main-content" tabIndex={-1}>
-        <div className="page-heading"><div><p className="eyebrow">ניהול מסמכים · בקרת נתונים</p><h1>{view === "workspace" ? "כל ההתחייבויות. מבט אחד." : "רשומות שמורות"}</h1>
+        <header className="page-heading"><div><p className="eyebrow">ניהול מסמכים · בקרת נתונים</p><h1>{view === "workspace" ? "כל ההתחייבויות. מבט אחד." : "רשומות שמורות"}</h1>
           <p>{view === "workspace" ? "תצוגה מרוכזת, טיפול בחריגים ומקור זמין לכל טופס." : "חיפוש, פתיחה והמשך ביקורת. ללא חילוץ מחדש."}</p></div>
+          <div className="heading-utilities">{sessionControls}
           <div className="heading-note"><Icon name={view === "workspace" ? "shield" : "records"} /><span>{view === "workspace" ? "האישור נשאר בידיים שלכם" : "כל טופס, וההיסטוריה שלו"}</span></div>
-        </div>
+          </div>
+        </header>
 
         {error && <div role="alert" className="message message-error"><Icon name="alert" /><p dir="auto">{error}</p></div>}
         {notice && <div role="status" className="message message-success"><Icon name="check" /><p>{notice}</p></div>}
@@ -556,8 +556,8 @@ export default function App() {
                 </label>
               </div>
               <div className="upload-actions"><span className="mini-heading"><Icon name="shield" size={18} />לפני שמתחילים</span>
-                <p role="note">הדגמה ציבורית למסמכים סינתטיים בלבד. אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי. הקבצים יישלחו ל־Gemini רק לאחר הסכמה מפורשת.</p>
-                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש להעביר את כל המסמכים שנבחרו ל־<bdi dir="ltr">Gemini</bdi>, ומאשר/ת שהם סינתטיים וללא מידע רפואי אישי.</span></label>
+                <p className="upload-safety" role="note">אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי.</p>
+                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש עיבוד של כל המסמכים שנבחרו באמצעות <bdi dir="ltr">Gemini</bdi>.</span></label>
                 <button className="button button-primary upload-button" onClick={upload} disabled={!file || !consent || !uploadQueue.some(item => item.status === "queued") || busy || !!pending || !!pendingFinal}><Icon name="upload" size={18} />העלאה וחילוץ<Icon name="arrow" size={17} /></button>
                 <small>ללא ניסיון חוזר אוטומטי. ביקורת וייצוא אינם מפעילים חילוץ נוסף.</small>
               </div>

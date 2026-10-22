@@ -1,10 +1,223 @@
-# הדגמת מוזמנים ב־Render + Neon — 21.10.2026
+# הדגמת מוזמנים ב־Render + Neon — 22.10.2026
 
 זהו מדריך הפריסה של עץ השחרור `storage/submission-release`, בענף
 `release/submission-2026-10-22`. פרסום הקוד לענף GitHub אושר בנפרד;
 המשתמש דיווח על אתר חי ב־https://viral-lab-judges-demo.onrender.com ואישר
 הפעלת חילוץ Gemini למסמכים סינתטיים שמעלה משתמש מחובר, לאחר הסכמה מפורשת.
 בתיקון זה לא בוצעו deploy ידני, קריאת Gemini או גישה ל־Neon או למסד המקומי.
+
+## אבחון 503/504 — פרסום מקור אושר; פריסה דורשת פעולה נפרדת
+
+המשתמש דיווח על `failure.code=PROVIDER_UNAVAILABLE`, עם `retryable=true`.
+זו תגובת יישום לאחר שמירת כשל; במסלול זה readiness, יצירת מסמך ושמירת
+הכשל כבר הושלמו. אין בכך הוכחה ל־503 מהספק: הגרסה הקודמת סיווגה גם HTTP
+504 של הספק כ־PROVIDER_UNAVAILABLE/503. באג סיווג זה תוקן; סיבת הכשל החי
+עדיין אינה מוכחת, כי אין HTTP status פנימי, שלב וזמן מהגרסה החיה הישנה.
+
+המסלול: שער התחברות/CSRF → schema readiness → בדיקת קובץ →
+`run_in_threadpool(CloudWorkflow.create)` → transaction של יצירת מסמך →
+Gemini policy → יצירת SDK client → `generate_content` → JSON/canonical →
+transaction של completion → תגובת HTTP. חיבור PostgreSQL אינו מוחזק לאורך
+קריאת הספק. אין durable job או התאוששות אוטומטית לרשומת processing לאחר restart.
+העיבוד סינכרוני ביחס לבקשת ההעלאה, אך אינו רץ על event loop. בדיקה באותה
+לולאה מאמתת ש־health ממשיך לענות ושהעלאה נוספת מקבלת 429 בזמן ספק ממתין.
+
+מגבלת ה־SDK נשארה 45,000 מילישניות, adapter retries=0 ו־SDK attempts=1.
+זהו timeout של לקוח HTTP, לא deadline כולל ל־upload+DB+generation, ולא
+הגדרת timeout של Render. אין timeout עצמאי ב־fetch של הממשק ואין כאן
+Gunicorn; `--workers 1` אינו כשלעצמו הסבר ל־504. לא הוגדלו timeouts ולא
+נוספו retries או מעבר מודל. `gemini-3.8-flash` נשאר. לפי [מדריך ההגירה הרשמי](https://ai.google.dev/gemini-api/docs/whats-new-gemini-3.8),
+הוסרה רק שליחת `temperature=0` למודל זה; מודלים אחרים שומרים על התנהגותם.
+זו התאמת API, לא הוכחה לסיבת 503 ולא טענה לשיפור דיוק. JSON mode נשאר,
+ו־schema generation מופעל רק אם דגל הניסוי הקיים הוגדר. לא בוצעה הערכת
+baseline/holdout חיה; אין לטעון לשימור איכות ללא השוואה מאושרת.
+
+אבחון חדש, בלי תוכן, filenames, hash מסמך, DSN, מפתחות, cookie או review_token:
+
+- `cloud_extraction_config`: booleans של בחירת Gemini/מודל 3.8, נוכחות
+  מפתח, outbound/policy/provider approval ו־schema flag; וכן timeout ומספר ניסיונות.
+  אלו ערכי התהליך שהפעיל Render, לא קריאה של `.env` מקומי.
+- `cloud_upload_started`, `cloud_upload_stage`, `cloud_upload_failed`,
+  `cloud_upload_finished`: `request_id`, `run_id` אם כבר נוצר, `stage`,
+  `active_stage`, `code`, `status_class`, `elapsed_ms`, `failure_kind`,
+  `provider_http_status`, `provider_status` מתוך allowlist בלבד ו־`timeout_phase`.
+  אין stack trace או טקסט exception. הלוג נשלח ל־logger הקיים של Uvicorn.
+- כותרת `X-Request-ID` ואובייקט `diagnostic` בתגובת כשל מאפשרים קורלציה.
+  לפני יצירת מסמך `run_id=null`; אין חשיפת רשומות אחרות או עקיפת auth.
+
+מה צריך לקבל מהפריסה הבאה, לאחר סקירה ואישור בלבד:
+
+1. `cloud_extraction_config`: כל שערי Gemini ונוכחות המפתח true; schema flag
+   לפי הבחירה המפורשת בלבד. היעדר מפתח או מדיניות חסומה מסווגים בנפרד.
+2. להעתיק רק `diagnostic` ואת `error.code`/`failure.code`, לא תגובה מלאה.
+   `PROVIDER_UNAVAILABLE` יחד עם `provider_http_status=503` ו־UNAVAILABLE
+   מאמתים 503 מהספק. `PROVIDER_TIMEOUT`/504 עם provider status 504 הם deadline
+   מהספק; `failure_kind=client_timeout` עם status פנימי null הם timeout מקומי,
+   ו־`timeout_phase` מבדיל read/connect/write/pool/unknown. לא להסיק מהמספר
+   החיצוני בלבד. ראו [שגיאות Gemini](https://ai.google.dev/gemini-api/docs/generate-content/api-errors?hl=en).
+3. `CLOUD_DATABASE_NOT_READY`, `CLOUD_DATABASE_CREATE_FAILED` או
+   `CLOUD_DATABASE_COMPLETE_FAILED` מצביעים על שלב DB מסוים. לא להריץ migration
+   או לשנות הרשאות כתגובה אוטומטית. כשל completion אינו אישור להעלות שוב;
+   הכתיבה עלולה להיות לא ודאית ויש לבדוק את הרשומה לפני ניסיון ידני נוסף.
+4. `CLOUD_PROVIDER_CLIENT_INIT_FAILED` או `CLOUD_BACKEND_UNEXPECTED` עם stage
+   מצביעים על שכבת השרת. כשל parsing/canonical מוחזר כ־502 עם קוד מתאים.
+5. אם מתקבל HTML/טקסט 503/504 ללא request ID ובלי רשומת finish, לבדוק
+   אירועי Render restart/OOM/proxy בנפרד. Free עשוי לישון או להתאפס לפי
+   [מגבלות Render Free](https://render.com/docs/free); לא אומת אירוע כזה באתר החי.
+
+רק לאחר אישור קוד ו־commit/push, המשתמש יבחר פריסה ידנית של ה־commit
+המאושר. אין צורך לשנות Neon, מפתח או timeout. לאחר קריאת לוג ההגדרות,
+לבצע בדיקה מורשית עם קובץ סינתטי אחד ואז כמה קבצים נפרדים, ולבדוק בידוד
+כשל, ביקורת, אישור אנושי ו־XLSX. אם נמדד timeout מקומי בספק: לשקול שינוי
+thinking level או deadline רק כמשימה מדודה ומאושרת, ולא להוסיף retry עיוור.
+ה־Blueprint וה־Auto Sync לא שונו במשימת אבחון זו.
+
+מסך הכניסה משתמש כעת בלוגו ובצבעי המוצר; שני פסי הכותרת הוסרו, ומצב
+ההתחברות וכפתור היציאה הועברו לכותרת התוכן. ההסכמה ל־Gemini נשארת מפורשת
+ולא מסומנת מראש; אזהרת המידע האישי נשארת קצרה באזור ההעלאה והכניסה.
+
+אימות התיקון: Backend offline מלא — **1,200 עברו**, כולל 14 בדיקות
+אבחון חדשות ובדיקת המשגר המקומי; Frontend — **54 עברו**; TypeScript
+ו־production build עברו על אותם קובצי Frontend ללא שינוי נוסף.
+בדיקת דפדפן אמיתי מול HTTPS מקומי עברה ב־1440×1000 וב־390×844: לוגו,
+RTL ללא overflow, הצגת/הסתרת סיסמה, היעדר שני הפסים, כפתור יציאה בכותרת,
+cookie מאובטח, חסימת anonymous/CSRF, העלאה סינתטית, XLSX וביטול session.
+נבדקו חזותית ארבעה צילומי מסך; הם תחת `frontend/storage` המוחרגת מההגשה.
+אין בבדיקות אלו PostgreSQL או Gemini חיים. בדיקות PostgreSQL לא הורצו
+במשימה זו, כדי לא להתחבר למסד. בשלב האימות הראשוני לא בוצעו staging,
+commit או push. בהמשך אושר פרסום המקור לאחר סקירה ובדיקות; לא אושרה פריסה.
+
+## הרצה מקומית: רשומות אינן תנאי לחילוץ
+
+`backend.tools.local_demo:app` מפעיל `DemoWorkflow` בזיכרון. ה־Premium UI
+מבקש רשומות בתחילת המסך, אך `GET /api/v1/business-records` דורש
+`DurableWorkflow`; לכן במצב זיכרון מתקבל **404 / DURABLE_RECORDS_UNAVAILABLE**.
+זו אינה שגיאת Gemini או הוכחה שחסר חיבור למסד הנדרש לחילוץ. `POST
+/api/v1/demo-runs` נשאר זמין ומפעיל את Gemini אם כל שערי המדיניות וההסכמה
+תקינים. גם ביקורת ו־Excel עובדים בזיכרון; סגירת התהליך/TTL מאבדת את הרשומות.
+הרשימה השמורה אינה נתמכת במצב זה. ב־local_demo כשל ספק חוזר כתגובה 201 עם
+`status=failed` ו־`failure.code`; במצב cloud הוא מתורגם ל־503/504 מתאים.
+לכן אין להסיק הצלחה מ־HTTP 201 בלבד. אין fallback לתוצאה מדומה.
+המשגר המקומי משתמש ב־SDK timeout של 60 שניות, לעומת 45 בענן; הצלחה
+מקומית לבדה אינה מוכיחה שהכשל בענן נפתר. לא שינינו הגבלות זמן אלו.
+
+נוספה בדיקה המפעילה את **המשגר המקומי האמיתי ומתאם Gemini עם SDK מדומה**:
+רשימה נדחית, חילוץ מצליח, ביקורת ו־XLSX עובדים, והרשימה עדיין נדחית. אין
+פנייה למסד או קריאה לספק. השגיאה המקומית אינה סיבת PROVIDER_UNAVAILABLE בענן.
+
+להדגמה מקומית מלאה עם שמירה ופתיחה חוזרת, המשגר הנכון הוא
+`backend.tools.durable_demo:create_durable_demo_app --factory`, מול PostgreSQL
+מקומי ייעודי שכבר הוכן עם 0001–0003. אין צורך ב־Neon. אם אין מסד מקומי
+כזה, להישאר במצב זיכרון; פקודות אלו אינן יוצרות מסד, role, migration או הרשאות.
+לא להשתמש במסד העסקי `viral_lab` או ב־`review_test_viral_lab` כמאגר הדגמה.
+
+### PowerShell — Backend, מתוך תיקיית הפרויקט המקורית בחלון חדש
+
+אין לקרוא את `.env` המקורי, אין `--env-file`, ואין להעתיק DSN של Render.
+המשגרים קוראים רק את סביבת התהליך. לבחור `memory` לבדיקה ללא מסד; לבחור
+`durable` רק אם קיים מסד מקומי מוכן בשם `viral_lab_submission_local_synthetic`.
+הסקריפט במצב durable מאמת יעד וסכמה בקריאה בלבד לפני הפעלת השרת.
+אין להריץ קובץ אמיתי: הזנת מפתח ודגלים מאפשרת עלות ספק רק לאחר העלאה
+והסכמה ידנית. אנחנו לא ביצענו העלאה חיה כחלק מהאימות.
+
+```powershell
+Set-Location -LiteralPath '.\storage\submission-release'
+$localPython = (Resolve-Path -LiteralPath '..\..\.venv\Scripts\python.exe').Path
+$localMode = 'memory' # Change to 'durable' only for the prepared LOCAL synthetic DB.
+foreach ($localName in @('REVIEW_DATABASE_DSN','NEON_OWNER_DSN','GEMINI_API_KEY',
+    'PGHOSTADDR','PGSERVICE','PGSERVICEFILE','PGOPTIONS')) {
+    if (Test-Path -LiteralPath "Env:$localName") { Remove-Item -LiteralPath "Env:$localName" }
+}
+$env:APP_DEPLOYMENT = 'local'
+$env:DEMO_DATA_POLICY = 'synthetic-only'
+$env:DEFAULT_EXTRACTION_ADAPTER = 'gemini'
+$env:GEMINI_MODEL = 'gemini-3.8-flash'
+$env:MAX_UPLOAD_BYTES = '5242880'
+$env:GEMINI_STRUCTURED_OUTPUTS_EXPERIMENTAL = 'false'
+$env:AI_OUTBOUND_ENABLED = 'true'
+$env:ALLOW_EXTERNAL_PHI = 'true'
+$env:APPROVED_AI_PROVIDERS = 'gemini'
+try {
+    if ($localMode -eq 'durable') {
+        $env:REVIEW_DATABASE_DSN = [System.Net.NetworkCredential]::new('',
+            (Read-Host 'LOCAL synthetic PostgreSQL DSN only' -AsSecureString)).Password
+        @'
+import os
+from sqlalchemy.engine import make_url
+from backend.persistence.db import create_review_engine
+from backend.persistence.cloud_database import check_business_schema
+engine = None
+try:
+    dsn = os.environ['REVIEW_DATABASE_DSN']
+    url = make_url(dsn)
+    if (url.drivername not in {'postgresql', 'postgresql+psycopg'}
+        or url.host not in {'127.0.0.1', 'localhost', '::1'}
+        or url.database != 'viral_lab_submission_local_synthetic'
+        or set(url.query) - {'sslmode', 'connect_timeout'}):
+        raise ValueError
+    engine = create_review_engine(dsn)
+    check_business_schema(engine, 'viral_lab_submission_local_synthetic')
+except Exception:
+    raise SystemExit('LOCAL_SYNTHETIC_TARGET_OR_SCHEMA_NOT_READY') from None
+finally:
+    if engine is not None:
+        engine.dispose()
+print('LOCAL_SYNTHETIC_SCHEMA_READY')
+'@ | & $localPython -B -
+        if ($LASTEXITCODE -ne 0) { throw 'Local validation failed; server was not started.' }
+    } elseif ($localMode -ne 'memory') { throw 'Choose memory or durable.' }
+    $env:GEMINI_API_KEY = [System.Net.NetworkCredential]::new('',
+        (Read-Host 'Gemini key for synthetic-only local processing' -AsSecureString)).Password
+    if ([string]::IsNullOrWhiteSpace($env:GEMINI_API_KEY)) { throw 'A key is required.' }
+    if ($localMode -eq 'memory') {
+        & $localPython -B -m uvicorn backend.tools.local_demo:app --host 127.0.0.1 --port 8000 --no-access-log --no-proxy-headers
+    } else {
+        & $localPython -B -m uvicorn backend.tools.durable_demo:create_durable_demo_app --factory --host 127.0.0.1 --port 8000 --no-access-log --no-proxy-headers
+    }
+} finally {
+    foreach ($localName in @('GEMINI_API_KEY','REVIEW_DATABASE_DSN','APPROVED_AI_PROVIDERS')) {
+        if (Test-Path -LiteralPath "Env:$localName") { Remove-Item -LiteralPath "Env:$localName" }
+    }
+    $env:AI_OUTBOUND_ENABLED = 'false'
+    $env:ALLOW_EXTERNAL_PHI = 'false'
+}
+```
+
+### PowerShell — Premium UI, בחלון חדש נוסף משורש הפרויקט המקורי
+
+```powershell
+Set-Location -LiteralPath '.\storage\submission-release'
+@'
+process.env.VITE_PUBLIC_DEMO = 'false';
+process.env.VITE_API_BASE_URL = '';
+process.chdir('frontend');
+await import('./frontend/node_modules/vite/bin/vite.js');
+'@ | node --input-type=module
+```
+
+פקודה זו מפעילה Vite עם ערכי התהליך הנכונים, גם ב־Windows PowerShell שמוחק
+משתנה סביבה כשמשייכים לו מחרוזת ריקה. אין תלות בערכי VITE ישנים בקובץ מקומי.
+ה־proxy הקיים מפנה `/api` ל־`http://127.0.0.1:8000`; לפתוח רק
+`http://127.0.0.1:5173`. הממשק שולח `X-Local-Demo: 1`, ולא cookies של הענן.
+לעצור שרת ישן באותו port לפני ההרצה; אין להריץ את משגר הענן כמעקף ל־HTTP מקומי.
+
+אם רוצים קובץ דוגמה מקומי מוחרג כגון `.env.local-synthetic`, אלו ערכים בטוחים
+כשה־AI כבוי. הקובץ אינו נטען בפקודות לעיל; הן מגדירות מדיניות במפורש בתהליך.
+אין לשמור בו מפתח או DSN של production, ואין לשנות את `.env` המקורי:
+
+```dotenv
+APP_DEPLOYMENT=local
+DEMO_DATA_POLICY=synthetic-only
+DEFAULT_EXTRACTION_ADAPTER=gemini
+GEMINI_MODEL=gemini-3.8-flash
+MAX_UPLOAD_BYTES=5242880
+GEMINI_STRUCTURED_OUTPUTS_EXPERIMENTAL=false
+AI_OUTBOUND_ENABLED=false
+ALLOW_EXTERNAL_PHI=false
+APPROVED_AI_PROVIDERS=
+GEMINI_API_KEY=
+REVIEW_DATABASE_DSN=
+```
 
 ## מצב לקראת פרסום הקוד הסופי
 

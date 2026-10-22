@@ -49,6 +49,8 @@ def extract_status_code(exc: Exception) -> int | None:
 
 def extract_provider_status(exc: Exception) -> str | None:
     body = getattr(exc, "body", None)
+    if not isinstance(body, dict):
+        body = getattr(exc, "response_json", None)
     error_body = body.get("error", body) if isinstance(body, dict) else {}
     if not isinstance(error_body, dict):
         error_body = {}
@@ -58,6 +60,7 @@ def extract_provider_status(exc: Exception) -> str | None:
         getattr(exc, "type", None),
         error_body.get("code"),
         error_body.get("type"),
+        error_body.get("status"),
     ):
         if isinstance(candidate, str) and candidate in SAFE_PROVIDER_STATUSES:
             return candidate

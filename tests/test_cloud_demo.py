@@ -12,6 +12,7 @@ import pytest
 from backend.cloud_app import CloudWorkflow, create_cloud_application
 from backend.core.cloud_config import CloudConfig
 from backend.core.config import AppConfig
+from backend.core.cloud_diagnostics import observe_provider
 from backend.core.demo_auth import COOKIE, DemoAuth, hash_password
 from backend.persistence.business_repository import BusinessRepository
 from backend.persistence.cloud_database import neon_url
@@ -293,7 +294,7 @@ def gemini_cloud(*, config=None, errors=None):
     payload = {"logical_forms": [{"form_id": "form-1", "fields": clean_result().logical_forms[0].fields.model_dump(mode="json")} ]}
     sdk = _FakeClient(*(errors if errors is not None else [_FakeResponse(payload) for _ in range(3)]))
     adapter = GeminiExtractionAdapter(config=config, max_document_bytes=config.max_upload_bytes,
-        max_retries=0, client_factory=lambda *_: sdk)
+        max_retries=0, client_factory=lambda *_: sdk, observer=observe_provider)
     return (*setup_cloud(adapter, app_config=config), sdk)
 
 

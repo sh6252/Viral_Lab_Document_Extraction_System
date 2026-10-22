@@ -58,6 +58,7 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         timeout_seconds: int = 60,
         max_retries: int = 1,
         sleep: SleepFn = time.sleep,
+        observer: Callable[[str, Exception | None], None] | None = None,
     ) -> None:
         self._config = config
         self._client_factory = client_factory or self._create_google_client
@@ -66,28 +67,38 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         self._max_retries = max_retries
         self._sleep = sleep
         self._policy = ProviderPolicy(config)
+        self._observer = observer
 
     def extract(self, request: ExtractionRequest, document: DocumentInput) -> ExtractionResult:
-        self._validate_document(document)
-        self._policy.require_external_phi_allowed(
-            request=request,
-            provider_name=self.provider_name,
-            api_key=self._config.gemini_api_key,
-        )
+        stage = "provider_policy"
+        try:
+            self._observe(stage)
+            self._validate_document(document)
+            self._policy.require_external_phi_allowed(request=request, provider_name=self.provider_name,
+                                                     api_key=self._config.gemini_api_key)
+            stage = "provider_client"
+            self._observe(stage)
+            client = self._client_factory(self._config.gemini_api_key or "", self._timeout_seconds)
+            stage = "provider_request"
+            self._observe(stage)
+            prompt = build_gemini_extraction_prompt(request.fields, request.locale)
+            response = self._generate_with_retries(client, prompt, document)
+            stage = "provider_parse"
+            self._observe(stage)
+            payload = self._parse_provider_payload(response)
+            stage = "canonicalize"
+            self._observe(stage)
+            result = to_canonical_result(request, payload, ProviderMetadata(
+                name=self.provider_name, mode="vision_ai", version=self._config.gemini_model))
+            validate_extraction_result_schema(result)
+            return result
+        except Exception as error:
+            self._observe(stage, error)
+            raise
 
-        prompt = build_gemini_extraction_prompt(request.fields, request.locale)
-        client = self._client_factory(self._config.gemini_api_key or "", self._timeout_seconds)
-        response = self._generate_with_retries(client, prompt, document)
-        payload = self._parse_provider_payload(response)
-        result = to_canonical_result(
-            request,
-            payload,
-            ProviderMetadata(
-                name=self.provider_name, mode="vision_ai", version=self._config.gemini_model
-            ),
-        )
-        validate_extraction_result_schema(result)
-        return result
+    def _observe(self, stage: str, error: Exception | None = None) -> None:
+        if self._observer is not None:
+            self._observer(stage, error)
 
     def _validate_document(self, document: DocumentInput) -> None:
         if document.mime_type not in SUPPORTED_MIME_TYPES:
@@ -118,10 +129,11 @@ class GeminiExtractionAdapter(ExtractionAdapter):
             raise ProviderUnavailable("Google Gen AI SDK is not installed.") from exc
 
         part = types.Part.from_bytes(data=document.content, mime_type=document.mime_type)
-        config = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0,
-        )
+        # Gemini 3.8 migration removes deprecated sampling parameters. Keep the
+        # existing sampling contract for other explicitly configured models.
+        config = types.GenerateContentConfig(response_mime_type="application/json")
+        if self._config.gemini_model != "gemini-3.8-flash":
+            config.temperature = 0
         if self._config.gemini_structured_outputs_experimental:
             config.response_json_schema = build_gemini_response_schema()
         return client.models.generate_content(
@@ -150,7 +162,7 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         diagnostics = safe_provider_diagnostics(exc)
         status_code = diagnostics.get("http_status_code")
         name = type(exc).__name__.lower()
-        if isinstance(exc, TimeoutError) or "timeout" in name:
+        if status_code == 504 or isinstance(exc, TimeoutError) or "timeout" in name:
             return ProviderTimeout(
                 "AI provider request timed out.",
                 diagnostics=diagnostics,

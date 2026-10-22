@@ -22,11 +22,12 @@ from urllib.parse import urlsplit
 from backend.api.routes.demo import router as local_business_router
 from backend.core.cloud_config import CloudConfig
 from backend.core.config import AppConfig
+from backend.core import cloud_diagnostics as diagnostic
 from backend.core.demo_auth import COOKIE, DemoAuth
 from backend.persistence.business_repository import BusinessRepository
 from backend.persistence.cloud_database import check_business_schema, create_cloud_engine
 from backend.services.business_review import BusinessReviewError
-from backend.services.demo_workflow import DemoError
+from backend.services.demo_workflow import DemoError, DemoRun
 from backend.services.durable_workflow import DurableWorkflow
 from backend.services.excel_export import ExcelExportError
 from backend.services.extraction.errors import ExtractionAdapterError
@@ -36,8 +37,10 @@ from backend.services.extraction.gemini_adapter import GeminiExtractionAdapter
 
 def error(code: str, status: int) -> JSONResponse:
     retry_after = "1" if code == "DEMO_BUSY" else "60" if code == "DEMO_RATE_LIMIT" else "300"
+    trace = diagnostic.CURRENT.get()
     return JSONResponse({"error": {"code": code, "message": "Demo request could not be completed.",
-                                    "retryable": status in {429, 503, 504}}}, status_code=status,
+                                    "retryable": status in {429, 503, 504}},
+                         **({"diagnostic": trace.summary()} if trace else {})}, status_code=status,
                         headers={"Cache-Control": "no-store", **({"Retry-After": retry_after} if status == 429 else {})})
 
 
@@ -53,14 +56,18 @@ class CloudBusinessRoute(APIRoute):
                     value = json.loads(response.body)
                     if value.get("status") == "failed":
                         code = value["failure"]["code"]
-                        status = {"PROVIDER_RATE_LIMIT": 429, "PROVIDER_TIMEOUT": 504,
-                                  "PROVIDER_NOT_AUTHORIZED": 403, "INVALID_PROVIDER_RESPONSE": 502,
-                                  "EXTRACTION_VALIDATION_ERROR": 502, "INVALID_PROVIDER_REQUEST": 502}.get(code, 503)
+                        status = diagnostic.failure_status(code)
                         value["error"] = {"code": code, "message": "Extraction failed; no fallback was used.",
                                           "retryable": value["failure"]["retryable"]}
+                        if trace := diagnostic.CURRENT.get():
+                            if trace.code is None:
+                                diagnostic.failure(code, status)
+                            trace.http_status = status
+                            value["diagnostic"] = trace.summary()
                         return JSONResponse(value, status_code=status)
                 return response
             except DemoError as exc:
+                diagnostic.failure(exc.code, exc.status)
                 return error(exc.code, exc.status)
             except RequestValidationError:
                 return error("INVALID_DEMO_INPUT", 422)
@@ -71,7 +78,8 @@ class CloudBusinessRoute(APIRoute):
             except ExcelExportError:
                 return error("DEMO_EXPORT_FAILED", 422)
             except Exception:
-                return error("DEMO_UNAVAILABLE", 503)
+                diagnostic.failure("CLOUD_BACKEND_UNEXPECTED", 503)
+                return error("CLOUD_BACKEND_UNEXPECTED", 503)
         return guarded
 
 
@@ -79,6 +87,31 @@ class CloudWorkflow(DurableWorkflow):
     def __init__(self, config: AppConfig, adapter: ExtractionAdapter | None, repository: BusinessRepository):
         super().__init__(config, adapter, repository)
         self.max_snapshot_bytes = 64 * 1024
+
+    def _store_new(self, run: DemoRun) -> None:
+        if trace := diagnostic.CURRENT.get():
+            trace.run_id = run.run_id
+        diagnostic.stage("database_create")
+        try:
+            super()._store_new(run)
+        except Exception as exc:
+            code = exc.code if isinstance(exc, DemoError) and exc.code != "BUSINESS_STORAGE_UNAVAILABLE" else "CLOUD_DATABASE_CREATE_FAILED"
+            status = exc.status if isinstance(exc, DemoError) and code == exc.code else 503
+            diagnostic.failure(code, status)
+            raise DemoError(code, status) from None
+        diagnostic.stage("provider_policy")
+
+    def _store_completed(self, run: DemoRun) -> None:
+        trace = diagnostic.CURRENT.get()
+        if run.failure and trace and trace.code is None:
+            diagnostic.failure(run.failure.failure_code, diagnostic.failure_status(run.failure.failure_code))
+        diagnostic.stage("database_complete")
+        try:
+            super()._store_completed(run)
+        except Exception:
+            diagnostic.failure("CLOUD_DATABASE_COMPLETE_FAILED", 503)
+            raise DemoError("CLOUD_DATABASE_COMPLETE_FAILED", 503) from None
+        diagnostic.stage("projection")
 
 
 class BodyTooLarge(Exception):
@@ -93,6 +126,19 @@ class PublicBoundary:
         self.upload_slot = BoundedSemaphore(1)
 
     async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("path") != "/api/v1/demo-runs" or scope.get("method") != "POST":
+            await self._handle(scope, receive, send)
+            return
+        trace = diagnostic.UploadTrace()
+        token = diagnostic.CURRENT.set(trace)
+        trace.log("cloud_upload_started")
+        try:
+            await self._handle(scope, receive, send)
+        finally:
+            trace.log("cloud_upload_finished")
+            diagnostic.CURRENT.reset(token)
+
+    async def _handle(self, scope, receive, send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -103,6 +149,9 @@ class PublicBoundary:
         async def secure_send(message):
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
+                if trace := diagnostic.CURRENT.get():
+                    trace.http_status = message["status"]
+                    headers.append((b"x-request-id", trace.request_id.encode("ascii")))
                 if is_api:
                     headers.append((b"cache-control", b"no-store"))
                 headers.extend([(b"x-content-type-options", b"nosniff"), (b"referrer-policy", b"no-referrer"),
@@ -112,8 +161,10 @@ class PublicBoundary:
             await send(message)
 
         async def deny(code: str, status: int):
+            diagnostic.failure(code, status)
             await error(code, status)(scope, receive, secure_send)
 
+        diagnostic.stage("authentication")
         origin = request.headers.get("origin")
         if is_api and origin is not None and origin != self.config.origin:
             await deny("ORIGIN_DENIED", 403)
@@ -146,12 +197,14 @@ class PublicBoundary:
                 await deny("LOGIN_RATE_LIMIT", 429)
                 return
         if is_api and method not in {"GET", "HEAD"} and not path.startswith("/api/v1/auth/"):
+            diagnostic.stage("database_readiness")
             try:
                 await run_in_threadpool(self.readiness)
             except Exception:
                 await deny("CLOUD_DATABASE_NOT_READY", 503)
                 return
         upload = path == "/api/v1/demo-runs" and method == "POST"
+        diagnostic.stage("upload_validation")
         if upload and not self.upload_slot.acquire(blocking=False):
             await deny("DEMO_BUSY", 429)
             return
@@ -279,7 +332,14 @@ def create_cloud_app() -> FastAPI:
         if provider not in {"local_ocr", "none", "", "gemini"}:
             raise ValueError("UNSUPPORTED_CLOUD_PROVIDER")
         adapter = GeminiExtractionAdapter(config=config, max_document_bytes=config.max_upload_bytes,
-            timeout_seconds=45, max_retries=0, client_factory=_one_attempt_client) if provider == "gemini" else None
+            timeout_seconds=45, max_retries=0, client_factory=_one_attempt_client,
+            observer=diagnostic.observe_provider) if provider == "gemini" else None
+        diagnostic.LOGGER.info(json.dumps({"event": "cloud_extraction_config",
+            "adapter_gemini": provider == "gemini", "model_is_gemini_38_flash": config.gemini_model == "gemini-3.8-flash",
+            "api_key_present": bool(config.gemini_api_key), "ai_outbound_enabled": config.ai_outbound_enabled,
+            "external_policy_enabled": config.allow_external_phi, "gemini_approved": "gemini" in config.approved_ai_providers,
+            "structured_output_enabled": config.gemini_structured_outputs_experimental,
+            "sdk_timeout_ms": 45000, "adapter_retries": 0, "sdk_attempts": 1}, separators=(",", ":")))
         workflow = CloudWorkflow(config, adapter, BusinessRepository(engine, capacity_limits=(30, 32 * 1024 * 1024)))
         directory = Path(__file__).resolve().parents[1] / "frontend/dist"
         if not (directory / "index.html").is_file():

@@ -336,9 +336,32 @@ summary { cursor: pointer; padding-block: 5px; }
 .approval-dialog > small { display: block; font-size: .68rem; color: var(--muted); margin-top: 6px; }
 .field-card, #focused-review-title { scroll-margin-top: 20px; }
 @media (max-width: 720px) { .approval-dialog { padding: 18px; } }
-/* Invited-judge session boundary; the workbench remains unchanged. */
-.demo-access { display:flex; gap:1rem; justify-content:space-between; align-items:center; padding:.65rem 1.25rem; background:#e9f0f2; color:#123340; }
-.demo-login { max-width:30rem; margin:8vh auto; padding:1.5rem; }
-.demo-login form { display:grid; gap:.8rem; }
-.demo-login input { padding:.75rem; border:1px solid #77939c; border-radius:.4rem; }
-.demo-login button { padding:.75rem; }
+/* Same-origin login uses the workbench palette and local brand asset. */
+.demo-login { display: grid; place-items: center; min-height: 100dvh; max-width: none; margin: 0; padding: 32px 20px; background: radial-gradient(ellipse at 80% 15%, #d9eeeb, transparent 55%), linear-gradient(145deg, #f4f7fa, #eef3f7); }
+.auth-card { width: min(100%, 440px); background: #fff; border: 1px solid var(--border); border-radius: 24px; box-shadow: 0 18px 65px #122e4010; padding: clamp(24px, 6vw, 42px); text-align: center; }
+.auth-logo { display: block; margin: 0 auto 22px; border-radius: 20px; box-shadow: 0 5px 18px #122e4012; }
+.auth-card h1 { font-size: clamp(1.9rem, 5vw, 2.4rem); letter-spacing: -.04em; margin: 5px 0; }
+.auth-intro { font-size: .94rem; color: var(--muted); }
+.auth-card form { display: grid; gap: 9px; text-align: start; margin-top: 32px; }
+.auth-card label { font-size: .85rem; font-weight: 600; color: var(--navy); }
+.auth-password { position: relative; }
+.auth-password input { width: 100%; min-width: 0; min-height: 50px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px 12px 70px; color: var(--navy); background: #f9fbfc; direction: ltr; text-align: right; }
+.auth-password input:focus { border-color: var(--teal); background: #fff; }
+.password-toggle { position: absolute; inset-inline-end: 7px; top: 5px; min-height: 40px; padding: 7px 10px; border: 0; border-radius: 8px; color: var(--teal-dark); background: transparent; font-size: .76rem; }
+.password-toggle:hover { background: var(--teal-soft); }
+.auth-submit { justify-content: center; width: 100%; min-height: 50px; border-radius: 12px; margin-top: 13px; }
+.auth-error { margin-top: 18px; padding: 10px; color: var(--danger); background: #fff2f2; border-radius: 10px; font-size: .83rem; }
+.auth-safety { margin-top: 25px; padding-top: 20px; border-top: 1px solid var(--border); font-size: .72rem; color: var(--muted); }
+.heading-utilities { display: flex; flex-direction: column; align-items: flex-end; gap: 16px; }
+.session-controls { display: flex; align-items: center; justify-content: flex-end; gap: 14px; flex-wrap: wrap; }
+.session-controls [role="alert"] { max-width: 260px; color: var(--danger); font-size: .78rem; }
+.session-status { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .76rem; white-space: nowrap; }
+.session-status .status-dot { background: var(--teal); }
+.session-controls .button { min-height: 40px; padding: 8px 14px; font-size: .76rem; }
+.upload-safety { font-size: .76rem !important; }
+@media (max-width: 720px) {
+  .page-heading { align-items: flex-start; flex-wrap: wrap; gap: 18px; }
+  .heading-utilities { width: 100%; align-items: stretch; }
+  .session-controls { justify-content: flex-start; }
+  .demo-login { padding: 20px 16px; }
+}

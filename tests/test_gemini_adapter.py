@@ -541,6 +541,7 @@ def test_gemini_38_installed_sdk_serializes_documents_and_parses_canonical_outpu
         assert inline["mimeType"] == mime and urlsafe_b64decode(inline["data"]) == content
         generation = body["generationConfig"]
         assert generation["responseMimeType"] == "application/json"
+        assert "temperature" not in generation  # Gemini 3.8 migration requirement.
         if structured:
             assert generation["responseJsonSchema"] == build_gemini_response_schema()
         else:
