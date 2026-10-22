@@ -5,6 +5,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
 from hashlib import sha256
+import json
+import logging
 from typing import ParamSpec, TypeVar
 
 from sqlalchemy import Connection, Engine, func, insert, select, text, update
@@ -64,6 +66,16 @@ class BusinessRepository:
                 count, size = conn.execute(select(func.count(), func.coalesce(func.sum(
                     func.octet_length(documents.c.source_bytes)), 0))).one()
                 if count >= self.capacity_limits[0] or size + len(run.source) > self.capacity_limits[1]:
+                    # Admission limits are application policy, not a PostgreSQL/Neon error.
+                    # Aggregates only: never exception text, source, hash, token or SQL parameters.
+                    logging.getLogger("uvicorn.error").info(json.dumps({
+                        "event": "business_capacity_rejected", "run_id": run.run_id,
+                        "document_limit_reached": count >= self.capacity_limits[0],
+                        "source_byte_limit_reached": size + len(run.source) > self.capacity_limits[1],
+                        "document_count": int(count), "source_bytes": int(size),
+                        "incoming_source_bytes": len(run.source),
+                        "max_documents": self.capacity_limits[0], "max_source_bytes": self.capacity_limits[1],
+                    }, separators=(",", ":")))
                     raise DemoError("DEMO_CAPACITY_REACHED", 503)
             conn.execute(insert(documents).values(document_id=run.run_id, review_token=run.review_token,
                 source_bytes=run.source, source_sha256=run.source_sha256, mime_type=run.mime_type,

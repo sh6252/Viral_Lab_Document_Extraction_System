@@ -6,6 +6,65 @@
 הפעלת חילוץ Gemini למסמכים סינתטיים שמעלה משתמש מחובר, לאחר הסכמה מפורשת.
 בתיקון זה לא בוצעו deploy ידני, קריאת Gemini או גישה ל־Neon או למסד המקומי.
 
+## חסימת העלאה בשל קיבולת מצטברת — אבחון ותיקון מוצע
+
+`DEMO_CAPACITY_REACHED` ב־`database_create` עם אפס ניסיונות ספק אינו תרגום
+של חריגת Neon. `BusinessRepository.create` נועל admission ב־transaction,
+קורא count וסכום octet_length של source_bytes מכל business_documents,
+ומעלה DemoError מפורש אם count>=30 או שהמקור החדש יחרוג מ־33554432 bytes.
+זהו מספר העלאות מצטבר, לא מספר טפסים/התחייבויות או עיבודים פעילים.
+גם succeeded, failed ו־processing נשארים בספירה; אין TTL במסלול durable.
+אין INSERT או Gemini לאחר דחיית admission. שגיאות SQL אינן ממופות לקוד זה:
+`_safe` מחזיר BUSINESS_STORAGE_UNAVAILABLE, והענן מתרגם אותו ל־
+CLOUD_DATABASE_CREATE_FAILED. SQLSTATE המקורי אינו נכלל בלוגים הקיימים.
+
+לא בוצעה קריאת Render logs או התחברות למסד במשימה זו. האבחון נשען על
+התגובה החיה שסופקה ועל הקוד. אין הוכחה איזו משתי התקרות נחצתה, או מה
+ניצול האחסון בפלטפורמה. לבדיקה מפורשת בקריאה בלבד, במסד הסינתטי הנכון:
+
+```sql
+SELECT count(*) AS documents,
+       COALESCE(sum(octet_length(source_bytes)), 0) AS source_bytes
+FROM public.business_documents;
+```
+
+אין להעתיק מסמכים, tokens, DSN או SQL errors מלאים לצורך האבחון. די בשני
+המספרים. restart, המתנה, החלפת מפתח Gemini או הגדלת connection pool לא
+משנים את הספירה. אם רק תקרת הבתים נחצתה ויש פחות מ־30 מסמכים, קובץ קטן
+יותר עשוי להיכנס; אין הבטחה. ביקורת וייצוא של רשומות קיימות אינם צורכים
+admission חדש. retryable=true בתגובת 503 אינו מבטיח שהמתנה תפתור תקרה זו.
+
+התיקון המוצע משאיר את אותן ברירות מחדל ואת הנעילה האטומית, ומאפשר
+הגדרה דרך Backend environment בלבד: DEMO_MAX_DOCUMENTS בתחום 1..200,
+ו־DEMO_MAX_SOURCE_BYTES בתחום 1..134217728. אפס, ערך שלילי, ביטול מגבלה
+או ערך מעל הגבול נדחים לפני חיבור למסד. אין שינוי ב־render.yaml, הרשאות,
+TLS, schema, upload של 5 MiB, Gemini, timeout או retry. המשתנים אינם VITE.
+הגבולות הם מגבלת המקורות בלבד; אינם מכסת Neon ואינם כוללים projections,
+audit, indexes או WAL. יש לבדוק ניצול בפלטפורמה לפני העלאה של התקרה.
+
+לאחר סקירה, אישור פרסום ופריסה ידנית של הקוד, ורק אם יש headroom מתאים,
+הגדרה זמנית אפשרית היא DEMO_MAX_DOCUMENTS=100 ו־
+DEMO_MAX_SOURCE_BYTES=67108864 (64 MiB). הגדרה לבדה בגרסה הישנה לא תעזור:
+המגבלות שם hardcoded. אין להוריד שוב את התקרה מתחת לניצול המצטבר ולצפות
+שהעלאות יימשכו; הרשומות אינן נמחקות, אך admission ייחסם מחדש.
+
+בלוג startup תופיע התצורה בפועל. `business_capacity_rejected` מוסיף רק
+run_id, סיבה בשני booleans, ספירת מסמכים וסכומי bytes/גבולות; אין תוכן,
+hash, token, פרמטרי SQL או credentials. האבחון מסווג את הכשל כ־
+application_capacity במקום database, תוך שמירת אותו HTTP/code ושלב.
+שגיאות DB אחרות אינן מקבלות סיווג קיבולת. אין כאן logging של SQLSTATE
+חדש או מנגנון retry למסד. נבדקו מסלולי context-manager של create/complete
+במוקים: החיבור משתחרר לפני הספק, גם בכשל וב־rollback. זו אינה מדידת
+pool חי ב־Neon. עסקאות וחיבורים מנוהלים ב־with engine.begin/connect;
+engine.dispose קיים בכשל startup ובסיום היישום.
+
+אימות: 280 בדיקות Backend ממוקדות עברו, כולל 34 בדיקות קיבולת חדשות,
+auth/CSRF, מיפוי 503/504, retries של ספק, ביקורת ואישור וייצוא. נבדקו
+SQLSTATE מדומים 53300/08006/53100/42501 ו־SQLAlchemy pool timeout: כולם
+נשארים כשלי מסד ואינם הופכים ל־DEMO_CAPACITY_REACHED. משמעות SQLSTATE
+מתועדת ב־[PostgreSQL error codes](https://www.postgresql.org/docs/current/errcodes-appendix.html).
+לא הורצו בדיקות PostgreSQL חיות/מיגרציות ואין טענה למדידת Neon production.
+
 ## ביקורת גלויה ומציג מקור מקומי — Frontend בלבד
 
 כל שבעת שדות הטופס מוצגים יחד ובסדר שולחן העבודה, עם ערכי המקור, מצב

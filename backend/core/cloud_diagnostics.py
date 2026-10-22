@@ -70,7 +70,8 @@ def failure(code: str, status: int, error: Exception | None = None) -> None:
             phases = {"ConnectTimeout": "connect", "ReadTimeout": "read", "WriteTimeout": "write", "PoolTimeout": "pool"}
             trace.timeout_phase = "provider_deadline" if trace.provider_http_status == 504 else (
                 phases.get(exception_class, "unknown") if isinstance(exception_class, str) else "unknown")
-        trace.failure_kind = ("database" if trace.stage.startswith("database") else
+        trace.failure_kind = ("application_capacity" if code == "DEMO_CAPACITY_REACHED" else
+            "database" if trace.stage.startswith("database") else
             "provider_http" if trace.provider_http_status else "client_timeout" if code == "PROVIDER_TIMEOUT" else
             "policy" if code in {"PROVIDER_NOT_AUTHORIZED", "MISSING_PROVIDER_CREDENTIALS"} else
             "provider" if code.startswith("PROVIDER_") else

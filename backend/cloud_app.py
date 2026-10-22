@@ -339,9 +339,11 @@ def create_cloud_app() -> FastAPI:
             "api_key_present": bool(config.gemini_api_key), "ai_outbound_enabled": config.ai_outbound_enabled,
             "external_policy_enabled": config.allow_external_phi, "gemini_approved": "gemini" in config.approved_ai_providers,
             "structured_output_enabled": config.gemini_structured_outputs_experimental,
+            "demo_max_documents": cloud.demo_max_documents, "demo_max_source_bytes": cloud.demo_max_source_bytes,
             "sdk_timeout_ms": cloud.gemini_timeout_seconds * 1000, "adapter_retries": 2,
             "retry_only_http_503_unavailable": True, "sdk_attempts": 1}, separators=(",", ":")))
-        workflow = CloudWorkflow(config, adapter, BusinessRepository(engine, capacity_limits=(30, 32 * 1024 * 1024)))
+        workflow = CloudWorkflow(config, adapter, BusinessRepository(engine,
+            capacity_limits=(cloud.demo_max_documents, cloud.demo_max_source_bytes)))
         directory = Path(__file__).resolve().parents[1] / "frontend/dist"
         if not (directory / "index.html").is_file():
             raise ValueError("FRONTEND_BUILD_REQUIRED")

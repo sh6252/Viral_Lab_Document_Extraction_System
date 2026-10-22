@@ -393,6 +393,7 @@ def test_production_factory_selects_existing_gemini_adapter_and_configured_model
     for name, value in {"APP_DEPLOYMENT": "cloud", "DEMO_DATA_POLICY": "synthetic-only", "DEMO_PUBLIC_ORIGIN": ORIGIN,
         "DEMO_PASSWORD_HASH": PASSWORD_HASH, "DEMO_DATABASE_NAME": "submission_synthetic", "MAX_UPLOAD_BYTES": "5242880",
         "DEFAULT_EXTRACTION_ADAPTER": "gemini", "AI_OUTBOUND_ENABLED": "true", "ALLOW_EXTERNAL_PHI": "true",
+        "DEMO_MAX_DOCUMENTS": "100", "DEMO_MAX_SOURCE_BYTES": "67108864",
         "APPROVED_AI_PROVIDERS": "gemini", "GEMINI_API_KEY": "synthetic-offline-key", "GEMINI_MODEL": "existing-configured-model"}.items():
         monkeypatch.setenv(name, value)
     directory = tmp_path / "frontend" / "dist"
@@ -410,12 +411,14 @@ def test_production_factory_selects_existing_gemini_adapter_and_configured_model
     assert workflow.adapter._config.gemini_model == "existing-configured-model"
     assert workflow.adapter._max_retries == 2 and workflow.adapter._retry_unavailable_only is True
     assert workflow.config.max_upload_bytes == 5 * 1024 * 1024
+    assert workflow.repository.capacity_limits == (100, 64 * 1024 * 1024)
     expected_timeout = int(timeout or "120")
     assert workflow.adapter._timeout_seconds == expected_timeout
     messages = [json.loads(record.message) for record in caplog.records if record.name == "uvicorn.error"]
     assert messages[-1]["sdk_timeout_ms"] == expected_timeout * 1000
     assert messages[-1]["sdk_attempts"] == 1 and messages[-1]["adapter_retries"] == 2
     assert messages[-1]["retry_only_http_503_unavailable"] is True
+    assert messages[-1]["demo_max_documents"] == 100 and messages[-1]["demo_max_source_bytes"] == 64 * 1024 * 1024
     factory.assert_not_called()
     engine.connect.assert_not_called()
 
