@@ -332,14 +332,15 @@ def create_cloud_app() -> FastAPI:
         if provider not in {"local_ocr", "none", "", "gemini"}:
             raise ValueError("UNSUPPORTED_CLOUD_PROVIDER")
         adapter = GeminiExtractionAdapter(config=config, max_document_bytes=config.max_upload_bytes,
-            timeout_seconds=cloud.gemini_timeout_seconds, max_retries=0, client_factory=_one_attempt_client,
+            timeout_seconds=cloud.gemini_timeout_seconds, max_retries=2, retry_unavailable_only=True, client_factory=_one_attempt_client,
             observer=diagnostic.observe_provider) if provider == "gemini" else None
         diagnostic.LOGGER.info(json.dumps({"event": "cloud_extraction_config",
             "adapter_gemini": provider == "gemini", "model_is_gemini_38_flash": config.gemini_model == "gemini-3.8-flash",
             "api_key_present": bool(config.gemini_api_key), "ai_outbound_enabled": config.ai_outbound_enabled,
             "external_policy_enabled": config.allow_external_phi, "gemini_approved": "gemini" in config.approved_ai_providers,
             "structured_output_enabled": config.gemini_structured_outputs_experimental,
-            "sdk_timeout_ms": cloud.gemini_timeout_seconds * 1000, "adapter_retries": 0, "sdk_attempts": 1}, separators=(",", ":")))
+            "sdk_timeout_ms": cloud.gemini_timeout_seconds * 1000, "adapter_retries": 2,
+            "retry_only_http_503_unavailable": True, "sdk_attempts": 1}, separators=(",", ":")))
         workflow = CloudWorkflow(config, adapter, BusinessRepository(engine, capacity_limits=(30, 32 * 1024 * 1024)))
         directory = Path(__file__).resolve().parents[1] / "frontend/dist"
         if not (directory / "index.html").is_file():

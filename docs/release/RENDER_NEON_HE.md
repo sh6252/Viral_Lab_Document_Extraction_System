@@ -6,6 +6,32 @@
 הפעלת חילוץ Gemini למסמכים סינתטיים שמעלה משתמש מחובר, לאחר הסכמה מפורשת.
 בתיקון זה לא בוצעו deploy ידני, קריאת Gemini או גישה ל־Neon או למסד המקומי.
 
+## Retry מוגבל ל־Gemini HTTP 503 UNAVAILABLE בלבד
+
+אבחון חי נוסף אישר `PROVIDER_UNAVAILABLE`, ‏`stage=provider_request`,
+`failure_kind=provider_http`, HTTP פנימי 503, ‏`provider_status=UNAVAILABLE`
+ו־`elapsed_ms=2504`. זהו כשל ספק מהיר, ולא שגיאת התור, Neon או Render.
+בענן בלבד המתאם מאפשר עד שני retries לקריאת `generate_content` עם התאמה
+מדויקת ל־HTTP 503 וגם UNAVAILABLE. שלושה ניסיונות לכל היותר; המתנות
+אקספוננציאליות סביב 3 ו־8 שניות עם jitter של ±20% (2.4–3.6 ואז 6.4–9.6).
+אין retry ל־504, 429, authentication, כשל רשת, parsing/schema, DB או 503
+ללא UNAVAILABLE. לא מפעילים מחדש upload, workflow או persistence.
+רשומת processing נשמרת פעם אחת לפני הספק, ו־completion פעם אחת לאחר התוצאה
+הסופית. אין retry לאחר הצלחה או בעקבות כשל שמירה. לאחר מיצוי הניסיונות
+חוזר הכשל האמיתי והתור הסדרתי הקיים ממשיך לקובץ הבא.
+
+timeout נשאר 120 שניות לכל ניסיון כברירת מחדל, המודל/ה־prompt/הסכמה והגנות
+הגישה לא השתנו. שלושה ניסיונות ארוכים עשויים להימשך מעל שש דקות, בלי
+הבטחת הצלחה; זה אינו timeout כולל של הבקשה. אין retry פנימי של SDK:
+`HttpRetryOptions(attempts=1)` נשאר. בדיקת SDK מותקן עם HTTP transport
+מדומה וחסימת sockets מאמתת שאין הכפלת ניסיונות ושה־read timeout הוא 120 שניות.
+`provider_attempt_count` נוסף לאבחון וללוג הסופי; `cloud_provider_attempt`
+מציין כל ניסיון. שגיאת הספק האחרונה נשמרת לאחר מיצוי או שינוי סוג הכשל,
+ללא גוף תגובה, מסמך או סודות. ב־startup צפויים `adapter_retries=2`,
+`retry_only_http_503_unavailable=true`, ‏`sdk_attempts=1`, ‏`sdk_timeout_ms=120000`.
+אין צורך בשינוי משתני Render, סודות, Blueprint או Neon; נדרשת פריסה ידנית
+של ה־commit החדש לאחר פרסומו. הודעת ה־commit כוללת `[skip render]`.
+
 ## התקדמות אוטומטית של אצוות קבצים — 22.10.2026
 
 לאחר פריסת 1fe604e המשתמש דיווח על חילוץ PDF סינתטי מוצלח ועל ארבעה
@@ -16,7 +42,7 @@
 מלחיצות מהירות. מוצגים סטטוס וקוד בטוח לכל קובץ, HTTP כשזמין, התקדמות
 וסיכום הצלחות/כישלונות. תוצאה לא ידועה אינה הוכחה שהשרת לא שמר רשומה;
 לפני העלאה ידנית חוזרת יש לבדוק ברשומות השמורות. התור אינו עמיד לסגירת דפדפן.
-גם כשל 429 אינו מפעיל retry; כל קובץ אחר מקבל לכל היותר ניסיון אחד, בלי
+גם כשל 429 אינו מפעיל retry; לכל קובץ נשלחת בקשת upload אחת בלבד, בלי
 לעקוף מגבלות שרת. חסימת התחברות/CSRF ‏401/403 ללא תוצאת חילוץ שמורה עוצרת
 את התור ומחייבת טיפול בגישה. הרשאות, הסכמה, timeout, מודל ו־Backend לא שונו.
 
@@ -48,13 +74,13 @@ transaction של completion → תגובת HTTP. חיבור PostgreSQL אינו 
 `GEMINI_TIMEOUT_SECONDS` הוא משתנה Backend אופציונלי: מספר שלם בין 30 ל־120,
 ברירת מחדל 120. ערך לא תקין מונע startup בלי להדפיס את הערך. ההגדרה עוברת
 מה־CloudConfig למתאם ול־google-genai במילישניות, וגם ללוג ההגדרות הבטוח.
-adapter retries=0 ו־SDK attempts=1 נשמרו: ניסיון יחיד בלבד.
+SDK attempts=1 נשאר; עד שני adapter retries מותרים רק ל־503 UNAVAILABLE כמפורט לעיל.
 זהו timeout של לקוח HTTP, לא deadline כולל ל־upload+DB+generation, ולא
 הגדרת timeout של Render. אין timeout עצמאי ב־fetch של הממשק ואין כאן
 Gunicorn; `--workers 1` אינו כשלעצמו הסבר ל־504. לפי [התיעוד הרשמי של Render](https://render.com/docs/render-vs-heroku-comparison),
 תגובות HTTP יכולות להימשך עד 100 דקות; 120 שניות אינן חורגות ממגבלה זו.
 ניתוק דפדפן/סינון/רשת, restart או deadline פנימי של הספק עדיין עלולים לקטוע בקשה.
-לא נוספו retries או מעבר מודל. `gemini-3.8-flash` נשאר. לפי [מדריך ההגירה הרשמי](https://ai.google.dev/gemini-api/docs/whats-new-gemini-3.8),
+אין מעבר מודל. `gemini-3.8-flash` נשאר. לפי [מדריך ההגירה הרשמי](https://ai.google.dev/gemini-api/docs/whats-new-gemini-3.8),
 הוסרה רק שליחת `temperature=0` למודל זה; מודלים אחרים שומרים על התנהגותם.
 זו התאמת API, לא הוכחה לסיבת 503 ולא טענה לשיפור דיוק. JSON mode נשאר,
 ו־schema generation מופעל רק אם דגל הניסוי הקיים הוגדר. לא בוצעה הערכת
@@ -68,7 +94,8 @@ baseline/holdout חיה; אין לטעון לשימור איכות ללא השו
 - `cloud_upload_started`, `cloud_upload_stage`, `cloud_upload_failed`,
   `cloud_upload_finished`: `request_id`, `run_id` אם כבר נוצר, `stage`,
   `active_stage`, `code`, `status_class`, `elapsed_ms`, `failure_kind`,
-  `provider_http_status`, `provider_status` מתוך allowlist בלבד ו־`timeout_phase`.
+  `provider_http_status`, `provider_status` מתוך allowlist בלבד, `timeout_phase`
+  ו־`provider_attempt_count`.
   אין stack trace או טקסט exception. הלוג נשלח ל־logger הקיים של Uvicorn.
 - כותרת `X-Request-ID` ואובייקט `diagnostic` בתגובת כשל מאפשרים קורלציה.
   לפני יצירת מסמך `run_id=null`; אין חשיפת רשומות אחרות או עקיפת auth.
@@ -99,7 +126,7 @@ baseline/holdout חיה; אין לטעון לשימור איכות ללא השו
 לא שונה `render.yaml`; אין שינוי Blueprint לסנכרון. להשאיר Auto Deploy כבוי
 ו־Blueprint Auto Sync=No; הודעת ה־commit כוללת `[skip render]`.
 לאחר פריסה ידנית של ה־commit החדש, לוודא `sdk_timeout_ms=120000`,
-`adapter_retries=0`, `sdk_attempts=1` בלוג `cloud_extraction_config`.
+`adapter_retries=2`, `retry_only_http_503_unavailable=true`, `sdk_attempts=1` בלוג `cloud_extraction_config`.
 לאחר קריאת לוג ההגדרות,
 לבצע בדיקה מורשית עם קובץ סינתטי אחד ואז כמה קבצים נפרדים, ולבדוק בידוד
 כשל, ביקורת, אישור אנושי ו־XLSX. אם נמדד timeout מקומי בספק: לשקול שינוי
@@ -319,15 +346,15 @@ token ב־localStorage. חסימת Third-Party Cookies אינה פוגעת במ�
   אלה מגבלות תהליך, המתאפסות ב־restart; אינן שירות הגנה מבוזר מפני DDoS.
 - גוף בקשה מוגבל גם ב־stream/chunked, לפני parsing: העלאה 5 MiB ועוד מעטפת
   multipart של 64 KiB, פקודות 128 KiB, login ארבעה KiB. קובץ נבדק לפי חתימה.
-  עיבוד העלאה אחד בכל רגע; מתחרה מקבל 429. אין retry סמוי של provider.
+  עיבוד העלאה אחד בכל רגע; מתחרה מקבל 429. רק retry הספק המוגבל והמפורש שלעיל מותר.
 - Neon: עד 30 מסמכים ו־32 MiB של bytes מקור, גם בכשלים. admission ננעל
   ב־PostgreSQL advisory transaction lock ונבדק באותה עסקה של INSERT.
   snapshot לענן מוגבל ל־64 KiB; התקרה הקיימת של 32 טפסים נשמרת.
   היסטוריית הביקורת אינה נמחקת אוטומטית; צריך לעקוב אחר מכסת Neon.
 - קודי provider אמיתיים נשמרים: rate limit → 429, unavailable → 503,
   timeout → 504. גוף השגיאה שומר run_id וכשל שמור, ואינו ממציא רשומה מוצלחת.
-  ה־Frontend שומר את capability של ריצת הכשל גם בתשובת HTTP שגויה, עוצר את
-  התור ללא retry ומאפשר דוח כשל/ייצוא כשל משותף, בלי להציג טופס מאושר.
+  ה־Frontend שומר את capability של ריצת הכשל גם בתשובת HTTP שגויה, ממשיך את
+  התור בלי upload חוזר ומאפשר דוח כשל/ייצוא כשל משותף, בלי להציג טופס מאושר.
   status code או קובץ Excel אינם אישור טופס. אין אישור שדה אוטומטי.
 - תגובות API הן no-store; אין access log יישומי של URL/מסמך; נוספו CSP,
   nosniff, no-referrer, anti-framing ו־HSTS. לוגי הפלטפורמה עדיין דורשים

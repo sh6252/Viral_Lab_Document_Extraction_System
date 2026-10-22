@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import time
 from collections.abc import Callable
 from typing import Any
@@ -57,6 +58,7 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         max_document_bytes: int = DEFAULT_MAX_DOCUMENT_BYTES,
         timeout_seconds: int = 60,
         max_retries: int = 1,
+        retry_unavailable_only: bool = False,
         sleep: SleepFn = time.sleep,
         observer: Callable[[str, Exception | None], None] | None = None,
     ) -> None:
@@ -65,6 +67,9 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         self._max_document_bytes = max_document_bytes
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
+        if retry_unavailable_only and not 0 <= max_retries <= 2:
+            raise ValueError("UNAVAILABLE_RETRIES_MUST_BE_0_TO_2")
+        self._retry_unavailable_only = retry_unavailable_only
         self._sleep = sleep
         self._policy = ProviderPolicy(config)
         self._observer = observer
@@ -112,14 +117,22 @@ class GeminiExtractionAdapter(ExtractionAdapter):
         attempts = self._max_retries + 1
         for attempt in range(attempts):
             try:
+                self._observe("provider_attempt")
                 return self._call_provider(client, prompt, document)
             except ExtractionAdapterError:
                 raise
             except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary by transport.
                 error = self._classify_provider_error(exc)
-                if not error.retryable or attempt == attempts - 1:
+                details = error.safe_diagnostics()
+                retryable = (details.get("http_status_code") == 503 and details.get("provider_status") == "UNAVAILABLE"
+                             if self._retry_unavailable_only else error.retryable)
+                if not retryable or attempt == attempts - 1:
                     raise error from exc
-                self._sleep(min(2**attempt, 5))
+                if self._retry_unavailable_only:
+                    delay = 3 * (8 / 3) ** attempt  # Approximately 3s, then 8s; at most two retries.
+                    self._sleep(random.uniform(delay * 0.8, delay * 1.2))
+                else:
+                    self._sleep(min(2**attempt, 5))
         raise ProviderUnavailable("AI provider did not return a response.")
 
     def _call_provider(self, client: Any, prompt: str, document: DocumentInput) -> Any:

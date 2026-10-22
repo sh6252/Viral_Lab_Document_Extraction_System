@@ -25,6 +25,7 @@ class UploadTrace:
     provider_status: str | None = None
     timeout_phase: str | None = None
     http_status: int = 0
+    provider_attempt_count: int = 0
 
     def summary(self) -> dict:
         return {"request_id": self.request_id, "run_id": self.run_id,
@@ -32,6 +33,7 @@ class UploadTrace:
             "status_class": f"{self.http_status // 100}xx" if self.http_status else "pending",
             "failure_kind": self.failure_kind, "provider_http_status": self.provider_http_status,
             "provider_status": self.provider_status, "timeout_phase": self.timeout_phase,
+            "provider_attempt_count": self.provider_attempt_count,
             "elapsed_ms": round((monotonic() - self.started) * 1000)}
 
     def log(self, event: str) -> None:
@@ -77,6 +79,12 @@ def failure(code: str, status: int, error: Exception | None = None) -> None:
 
 
 def observe_provider(name: str, error: Exception | None = None) -> None:
+    if name == "provider_attempt" and error is None:
+        if trace := CURRENT.get():
+            trace.provider_attempt_count += 1
+            trace.stage = "provider_request"
+            trace.log("cloud_provider_attempt")
+        return
     if error is None:
         stage(name)
     else:

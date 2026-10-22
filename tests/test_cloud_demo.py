@@ -286,7 +286,7 @@ def test_malformed_security_headers_are_denied_without_unhandled_exceptions():
     assert response.status_code == 413
 
 
-def gemini_cloud(*, config=None, errors=None):
+def gemini_cloud(*, config=None, errors=None, retry_unavailable_only=False, sleep=lambda _: None):
     config = config or AppConfig(ai_outbound_enabled=True, allow_external_phi=True,
         approved_ai_providers=("gemini",), default_extraction_adapter="gemini",
         gemini_api_key="synthetic-offline-key", max_upload_bytes=5 * 1024 * 1024)
@@ -294,7 +294,8 @@ def gemini_cloud(*, config=None, errors=None):
     payload = {"logical_forms": [{"form_id": "form-1", "fields": clean_result().logical_forms[0].fields.model_dump(mode="json")} ]}
     sdk = _FakeClient(*(errors if errors is not None else [_FakeResponse(payload) for _ in range(3)]))
     adapter = GeminiExtractionAdapter(config=config, max_document_bytes=config.max_upload_bytes,
-        max_retries=0, client_factory=lambda *_: sdk, observer=observe_provider)
+        timeout_seconds=120, max_retries=2 if retry_unavailable_only else 0,
+        retry_unavailable_only=retry_unavailable_only, sleep=sleep, client_factory=lambda *_: sdk, observer=observe_provider)
     return (*setup_cloud(adapter, app_config=config), sdk)
 
 
@@ -407,12 +408,14 @@ def test_production_factory_selects_existing_gemini_adapter_and_configured_model
     workflow = app.state.demo_workflow
     assert isinstance(workflow.adapter, GeminiExtractionAdapter)
     assert workflow.adapter._config.gemini_model == "existing-configured-model"
-    assert workflow.adapter._max_retries == 0 and workflow.config.max_upload_bytes == 5 * 1024 * 1024
+    assert workflow.adapter._max_retries == 2 and workflow.adapter._retry_unavailable_only is True
+    assert workflow.config.max_upload_bytes == 5 * 1024 * 1024
     expected_timeout = int(timeout or "120")
     assert workflow.adapter._timeout_seconds == expected_timeout
     messages = [json.loads(record.message) for record in caplog.records if record.name == "uvicorn.error"]
     assert messages[-1]["sdk_timeout_ms"] == expected_timeout * 1000
-    assert messages[-1]["sdk_attempts"] == 1 and messages[-1]["adapter_retries"] == 0
+    assert messages[-1]["sdk_attempts"] == 1 and messages[-1]["adapter_retries"] == 2
+    assert messages[-1]["retry_only_http_503_unavailable"] is True
     factory.assert_not_called()
     engine.connect.assert_not_called()
 
