@@ -54,7 +54,8 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   const [focusedField, setFocusedField] = useState<FieldName | null>(null);
   const [uploadExpanded, setUploadExpanded] = useState(true);
   const [file, setFile] = useState<File | null>(null);
-  const [uploadQueue, setUploadQueue] = useState<{ id: string; file: File; status: "queued" | "processing" | "succeeded" | "failed"; code?: string }[]>([]);
+  const [uploadQueue, setUploadQueue] = useState<{ id: string; file: File; status: "queued" | "processing" | "succeeded" | "failed"; code?: string; httpStatus?: number }[]>([]);
+  const uploadActive = useRef(false);
   const [failedRuns, setFailedRuns] = useState<DemoRun[]>([]);
   const [includeFailures, setIncludeFailures] = useState(false);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -208,7 +209,8 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
     }
   }
   async function upload() {
-    if (!file || !consent || !uploadQueue.some(item => item.status === "queued")) return;
+    if (uploadActive.current || busy || pending || pendingFinal || !file || !consent || !uploadQueue.some(item => item.status === "queued")) return;
+    uploadActive.current = true;
     setBusy(true); setError(""); setNotice(""); setRun(null); setDrafts({}); setSaved({}); setPending(null);
     try {
       for (const item of uploadQueue.filter(item => item.status === "queued")) {
@@ -221,25 +223,26 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
           setUploadQueue(old => old.map(entry => entry.id === item.id ? { ...entry, status: next.status as "succeeded" | "failed", code: next.failure?.code } : entry));
           if (next.status === "succeeded") await documentForms(next);
           else setFailedRuns(old => [...old.filter(run => run.run_id !== next.run_id), next]);
-          if (next.failure?.code === "PROVIDER_RATE_LIMIT") {
-            setError("התור הושהה עקב מגבלת קצב. לא בוצע ניסיון חוזר. יתר הקבצים ממתינים להמשך יזום."); break;
-          }
         } catch (e) {
-          setUploadQueue(old => old.map(entry => entry.id === item.id ? { ...entry, status: "failed", code: e instanceof APIError ? e.code : "UNKNOWN_UPLOAD_RESULT" } : entry));
+          setUploadQueue(old => old.map(entry => entry.id === item.id ? { ...entry, status: "failed", code: e instanceof APIError ? e.code : "UNKNOWN_UPLOAD_RESULT", httpStatus: e instanceof APIError ? e.status : undefined } : entry));
           if (e instanceof APIError && e.failedRun) {
             const failed = e.failedRun;
             setFile(item.file); setSavedPreview(null); accept(failed);
             setFailedRuns(old => old.some(value => value.run_id === failed.run_id) ? old : [...old, failed]);
-            setError(`החילוץ נכשל בשרת (${e.code}, HTTP ${e.status}). דוח הכשל זמין לייצוא. התור הושהה ללא ניסיון חוזר.`);
+            setError(`החילוץ נכשל בשרת (${e.code}, HTTP ${e.status}). דוח הכשל זמין לייצוא. ממשיכים לקובץ הבא ללא ניסיון חוזר.`);
+          } else {
+            setError("העלאת קובץ נכשלה או שתוצאתה אינה ידועה. ממשיכים לקובץ הבא ללא ניסיון חוזר. יש לבדוק ברשומות השמורות לפני העלאה חוזרת של הקובץ שלא אומת.");
+          }
+          if (e instanceof APIError && !e.failedRun && [401, 403].includes(e.status)) {
+            setError(`העיבוד נעצר עקב חסימת גישה (${e.code}, HTTP ${e.status}). יש להתחבר מחדש או לבדוק הרשאות לפני המשך.`);
             break;
           }
-          setError("העלאת קובץ נכשלה או שתוצאתה אינה ידועה. התור הושהה; אין ניסיון חוזר אוטומטי. קבצים שהושלמו נשמרו בנפרד."); break;
         }
       }
       if (records) void loadRecords(0, appliedFilters);
     }
     catch (e) { setError(e instanceof APIError ? `העלאת המסמך נכשלה (${e.code}). לא בוצע ניסיון חוזר אוטומטי.` : "העלאת המסמך נכשלה. לא בוצע ניסיון חוזר אוטומטי."); }
-    finally { setBusy(false); }
+    finally { uploadActive.current = false; setBusy(false); }
   }
   async function selectForm(form: string) {
     if (!run) return;
@@ -454,7 +457,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   const previewMime = savedPreview?.mime ?? file?.type;
   const mockProvider = run?.provider?.toLowerCase().includes("mock");
   function chooseFile(files: File[]) {
-    if (busy || pending || pendingFinal) return;
+    if (uploadActive.current || busy || pending || pendingFinal) return;
     if (files.length > 30) { setError("ניתן לבחור עד 30 קבצים בתור אחד."); return; }
     const next = files[0];
     if (!next) return;
@@ -562,9 +565,9 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
                 <small>ללא ניסיון חוזר אוטומטי. ביקורת וייצוא אינם מפעילים חילוץ נוסף.</small>
               </div>
             </div>
-            {uploadQueue.length > 0 && <section className="upload-queue" aria-label="תור קבצים"><p aria-live="polite">הושלמו: {uploadQueue.filter(item => item.status === "succeeded").length} · נכשלו או לא אומתו: {uploadQueue.filter(item => item.status === "failed").length} · ממתינים: {uploadQueue.filter(item => item.status === "queued").length}</p>
+            {uploadQueue.length > 0 && <section className="upload-queue" aria-label="תור קבצים"><p aria-live="polite">{!busy && uploadQueue.every(item => ["succeeded", "failed"].includes(item.status)) && "עיבוד האצווה הסתיים. "}הושלמו: {uploadQueue.filter(item => item.status === "succeeded").length} · נכשלו או לא אומתו: {uploadQueue.filter(item => item.status === "failed").length} · בעיבוד: {uploadQueue.filter(item => item.status === "processing").length} · ממתינים: {uploadQueue.filter(item => item.status === "queued").length}</p>
               <p>זהו תור בדפדפן, ללא עיבוד רקע עמיד או המשך אוטומטי לאחר סגירתו. שמירה לאחר restart מחייבת את שרת PostgreSQL הקיים.</p>
-              <ul>{uploadQueue.map(item => <li key={item.id} data-upload-status={item.status}><bdi>{item.file.name}</bdi><span>{{ queued: "ממתין", processing: "בעיבוד", succeeded: "הושלם", failed: "נכשל או לא אומת" }[item.status]}</span>{item.code && <bdi dir="ltr">{item.code}</bdi>}</li>)}</ul>
+              <ul>{uploadQueue.map(item => <li key={item.id} data-upload-status={item.status}><bdi>{item.file.name}</bdi><span>{{ queued: "ממתין", processing: "בעיבוד", succeeded: "הושלם", failed: "נכשל או לא אומת" }[item.status]}</span>{item.code && <bdi dir="ltr">{item.code}</bdi>}{item.httpStatus && <bdi dir="ltr">HTTP {item.httpStatus}</bdi>}</li>)}</ul>
             </section>}
           </section>
 
