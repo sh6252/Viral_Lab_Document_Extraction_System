@@ -560,7 +560,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
               </div>
               <div className="upload-actions"><span className="mini-heading"><Icon name="shield" size={18} />לפני שמתחילים</span>
                 <p className="upload-safety" role="note">אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי.</p>
-                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש עיבוד של כל המסמכים שנבחרו באמצעות <bdi dir="ltr">Gemini</bdi>.</span></label>
+                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש את עיבוד כל המסמכים שנבחרו באמצעות כלי בינה מלאכותית.</span></label>
                 <button className="button button-primary upload-button" onClick={upload} disabled={!file || !consent || !uploadQueue.some(item => item.status === "queued") || busy || !!pending || !!pendingFinal}><Icon name="upload" size={18} />העלאה וחילוץ<Icon name="arrow" size={17} /></button>
                 <small>ללא ניסיון חוזר אוטומטי. ביקורת וייצוא אינם מפעילים חילוץ נוסף.</small>
               </div>

@@ -17,7 +17,8 @@ function fixture(): DemoRun {
 test("public demo warns against patient documents and never preselects external AI consent", () => {
   const app = appHarness();
   assert.match(text(app.tree), /אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי/);
-  assert.match(text(app.tree), /Gemini/);
+  const consent = app.nodes().find(n => n.type === "label" && n.props.className === "consent-control")!;
+  assert.equal(text(consent), "אני מאשר/ת במפורש את עיבוד כל המסמכים שנבחרו באמצעות כלי בינה מלאכותית.");
   assert.equal(app.nodes().find(n => n.props["aria-label"] === "אישור עיבוד חיצוני לכל הקבצים")!.props.checked, false);
 });
 
