@@ -335,6 +335,35 @@ summary { cursor: pointer; padding-block: 5px; }
 .approval-dialog .dialog-binding { font-size: .68rem; overflow-wrap: anywhere; color: var(--muted); }
 .approval-dialog > small { display: block; font-size: .68rem; color: var(--muted); margin-top: 6px; }
 .field-card, #focused-review-title { scroll-margin-top: 20px; }
+
+/* Review workspace: readable source, all seven fields, direct field actions. */
+@media (min-width: 1101px) {
+  .workspace.has-preview { grid-template-columns: minmax(0, 1.2fr) minmax(360px, 1fr); gap: 18px; }
+  .source-panel { position: sticky; top: 16px; padding: 16px; }
+}
+.review-panel { gap: 12px; }
+.field-card { padding: 10px 16px 16px; overflow-wrap: anywhere; }
+.field-card.is-focused { box-shadow: 0 0 0 2px #087f7a22; }
+.field-card .shared-field-note { font-size: .68rem; line-height: 1.5; }
+.field-card .original-block { margin-top: 10px; }
+.field-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.button-field { padding: 8px 11px; font-size: .75rem; border: 1px solid var(--border); background: #f7fafb; color: var(--navy); }
+.button-field:hover, .button-field.is-selected { background: var(--teal-soft); border-color: var(--teal); color: var(--teal-dark); }
+.field-saving { color: var(--teal-dark); font-size: .75rem; margin-top: 8px; }
+.pdf-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px; background: white; border-bottom: 1px solid var(--border); font-size: .72rem; }
+.pdf-toolbar .button { padding: 6px 10px; }
+.pdf-scroll { height: 72vh; min-height: 360px; overflow: auto; padding: 12px; direction: ltr; background: #dfe6eb; overscroll-behavior: contain; }
+.pdf-page { position: relative; margin: 0 auto 12px; background: white; box-shadow: 0 2px 7px #122e4026; max-width: none; }
+.pdf-page canvas { display: block; width: 100%; height: 100%; }
+.pdf-page p { position: absolute; inset: 0; direction: rtl; }
+.pdf-scroll > p { direction: rtl; }
+@media (max-width: 1100px) {
+  .pdf-scroll { height: 56vh; min-height: 300px; }
+}
+@media (max-width: 600px) {
+  .field-actions .button { flex: 1 1 42%; }
+  .pdf-toolbar { gap: 4px; }
+}
 @media (max-width: 720px) { .approval-dialog { padding: 18px; } }
 /* Same-origin login uses the workbench palette and local brand asset. */
 .demo-login { display: grid; place-items: center; min-height: 100dvh; max-width: none; margin: 0; padding: 32px 20px; background: radial-gradient(ellipse at 80% 15%, #d9eeeb, transparent 55%), linear-gradient(145deg, #f4f7fa, #eef3f7); }

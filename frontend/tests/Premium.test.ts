@@ -65,7 +65,7 @@ test("present source values never increase the human approval count; missing ID 
     assert.equal(app.nodes().some(n => n.props.role === "progressbar"), false, "No seven-approval progress task is imposed by the UI");
     const missing = app.nodes().find(n => n.props["data-field"] === "israeli_id")!;
     assert.match(String(missing.props.className), /needs-attention/);
-    const approve = app.action("israeli_id").props.children[1].find((n: any) => n.props.value === "approve_as_extracted");
+    const approve = app.actionButton("israeli_id", "approve_as_extracted");
     assert.ok(approve.props.disabled);
     assert.match(text(app.tree), /אישור שדה ריק/);
     assert.ok(app.button("שמירת החלטות הביקורת").props.disabled);

@@ -53,8 +53,8 @@ test("table renders one row per commitment and highlights only the shared missin
     const highlighted = app.nodes().filter(node => node.props["data-attention"]);
     assert.equal(highlighted.length, 3);
     assert.ok(highlighted.every(node => node.props["data-column"] === "israeli_id"));
-    assert.equal(app.nodes().filter(node => node.type === "fieldset").length, 0, "An unflagged form imposes no seven-field editor");
-    assert.match(text(app.tree), /אין דגלים מדווחים/);
+    assert.equal(app.nodes().filter(node => node.type === "fieldset").length, 7, "All fields remain visible without requiring seven approvals");
+    assert.match(text(app.tree), /כל שדות הטופס מוצגים/);
     assert.match(text(app.tree), /אינו אומדן ביטחון ואינו אישור אנושי/);
     assert.equal(app.nodes().find(node => node.props.type === "file")!.props.multiple, true);
     assert.equal(mock.calls.filter(call => call.startsWith("POST")).length, 1);
@@ -68,7 +68,7 @@ test("exception-only save posts one acknowledgment, removes flags and leaves six
     app.input("סינון שולחן העבודה", "attention");
     assert.equal(app.nodes().filter(node => node.props["data-work-row"]).length, 3);
     await app.click("החריגה הבאה");
-    assert.equal(app.nodes().filter(node => node.type === "fieldset").length, 1);
+    assert.equal(app.nodes().filter(node => node.type === "fieldset").length, 7);
     app.operator("בודקת סינתטית"); app.decide("israeli_id", "acknowledge_blank", "השדה חסר במסמך הסינתטי");
     await app.click("שמירת החלטות הביקורת");
     assert.equal(mock.commands.length, 1); assert.equal(mock.commands[0].actions.length, 1);

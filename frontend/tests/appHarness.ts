@@ -56,6 +56,7 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
       };
       if (name === "./api.ts") return api;
       if (name === "./workbench.ts") return workbench;
+      if (name === "./PdfPreview.tsx") return { PdfPreview: function PdfPreview() { return null; } };
       return require(name);
     },
     FormData, crypto, Date,
@@ -77,11 +78,15 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
     return one(n => n.type === "fieldset" && n.props["data-field"] === name);
   }
   function focusField(name: string) {
-    const selector = one(n => n.type === "select" && n.props["aria-label"] === "בחירת שדה לביקורת");
-    if (selector.props.value !== name) change(selector, name);
+    one(n => n.type === "fieldset" && n.props["data-field"] === name);
   }
-  function action(name: string) { return one(n => n.type === "select", field(name)); }
+  // Normalize selected-action state for existing save assertions, independent of control type.
+  function action(name: string) {
+    const group = one(n => n.props.role === "group" && "data-review-action" in n.props, field(name));
+    return { ...group, props: { ...group.props, value: group.props["data-review-action"] } };
+  }
   function reason(name: string) { return one(n => n.type === "input" && n.props["data-review-reason"], field(name)); }
+  function actionButton(name: string, value: string) { return one(n => n.type === "button" && n.props["data-action"] === value, field(name)); }
   function change(element: Element, value: string) { element.props.onChange({ target: { value } }); render(); }
   async function click(label: string) {
     const target = button(label); assert.ok(!target.props.disabled, `${label} must be enabled`);
@@ -89,7 +94,7 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
   }
   render();
   return {
-    button, action, reason, click, focusField,
+    button, action, actionButton, reason, click, focusField, render,
     check(label: string, checked = true) {
       one(n => n.type === "input" && n.props["aria-label"] === label).props.onChange({ target: { checked } }); render();
     },
@@ -121,7 +126,7 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
       assert.ok(target && !target.props.disabled);
       const completion = target.props.onClick(); render(); await completion; render();
     },
-    hasPreview() { return elements(tree).some(n => n.type === "iframe" && n.props.src === "blob:synthetic"); },
+    hasPreview() { return elements(tree).some(n => n.props.url === "blob:synthetic" || (n.type === "iframe" && n.props.src === "blob:synthetic")); },
     operator(value: string) {
       change(one(n => n.type === "input" && n.props.id === "operator-declaration"), value);
     },
@@ -132,8 +137,20 @@ export function appHarness(sourceURL = new URL("../src/App.tsx", import.meta.url
       await click("העלאה וחילוץ");
     },
     decide(name: string, value: string, why = "Inspected synthetic PDF") {
-      change(action(name), value); change(reason(name), why);
+      // Stage choices for the explicit multi-field save tests: supply the reviewer last.
+      const reviewer = one(n => n.type === "input" && n.props.id === "operator-declaration");
+      const operator = reviewer.props.value;
+      change(reviewer, "");
+      actionButton(name, value).props.onClick(); render();
+      change(reason(name), why);
+      change(one(n => n.type === "input" && n.props.id === "operator-declaration"), operator);
     },
+    async act(name: string, value: string) {
+      const target = actionButton(name, value);
+      assert.ok(!target.props.disabled);
+      const completion = target.props.onClick(); render(); await completion; render();
+    },
+    setReason(name: string, value: string) { change(reason(name), value); },
     value(name: string, index: number, value: string) {
       focusField(name);
       change(one(n => n.type === "input" && n.props["data-value-field"] === name && n.props["data-value-index"] === index), value);

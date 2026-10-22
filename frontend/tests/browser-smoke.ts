@@ -113,8 +113,8 @@ try {
   await click("רשומות שמורות"); await ready("document.querySelectorAll('.saved-records tbody tr').length === 25");
   await checkWidth(); await screenshot("desktop-records.png");
   await evaluate("Array.from(document.querySelectorAll('button')).find(b => b.getAttribute('aria-label')?.startsWith('פתיחת רשומה ')).click()");
-  await ready("document.querySelectorAll('[data-work-row]').length === 20 && document.querySelector('iframe')");
-  assert.equal(await evaluate("document.querySelectorAll('fieldset').length"), 0, "Unflagged forms do not impose seven editors");
+  await ready("document.querySelectorAll('[data-work-row]').length === 20 && document.querySelector('.pdf-viewer')");
+  assert.equal(await evaluate("document.querySelectorAll('fieldset').length"), 7, "All fields remain visible, including unflagged ones");
   assert.equal(preview.stats.uploads, 0, "Reopening cannot extract");
   assert.equal(await evaluate("document.querySelector('.source-open').rel"), "noopener noreferrer");
   await click("עמוד הבא בטבלה"); assert.equal(await evaluate("document.querySelectorAll('[data-work-row]').length"), 5);
@@ -132,8 +132,8 @@ try {
   assert.equal(await evaluate("document.querySelectorAll('[data-attention]').length"), 3);
   assert.ok(await evaluate("Array.from(document.querySelectorAll('[data-attention]')).every(cell => cell.dataset.column === 'israeli_id')"));
   await click("החריגה הבאה");
-  await ready("document.querySelectorAll('fieldset').length === 1 && document.querySelector('[data-field=israeli_id] .missing-value')");
-  assert.equal(await evaluate("document.querySelector('[data-field=israeli_id] option[value=approve_as_extracted]').disabled"), true);
+  await ready("document.querySelectorAll('fieldset').length === 7 && document.querySelector('[data-field=israeli_id] .missing-value')");
+  assert.equal(await evaluate("document.querySelector('[data-field=israeli_id] button[data-action=approve_as_extracted]').disabled"), true);
   await pause(700);
   await evaluate("document.querySelector('#review-workspace').scrollIntoView()"); await screenshot("desktop-review.png");
   console.log("25 commitment rows / bounded table pages / shared missing-ID exception / focused review: PASS");
@@ -145,33 +145,30 @@ try {
   await click("עיבוד וביקורת");
   await cdp("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   assert.equal(await evaluate("getComputedStyle(document.querySelector('.button')).transitionDuration"), "0s");
-  await select("בחירת שדה לביקורת", "israeli_id");
-  await select("החלטה עבור תעודת זהות", "acknowledge_blank");
   await input("[data-field=israeli_id] [data-review-reason]", "השדה חסר במקור הסינתטי");
   await input("#operator-declaration", "בודקת סינתטית — בדיקת ממשק בלבד");
-  await click("שמירת החלטות הביקורת");
+  await evaluate("document.querySelector('[data-field=israeli_id] button[data-action=acknowledge_blank]').click()");
   await ready("document.body.textContent.includes('נשמרה החלטת ביקורת אחת') && document.body.textContent.includes('גרסה 1')");
   assert.equal(preview.stats.decisions, 1, "Exception-only review must never invent six approvals");
   assert.equal(await evaluate("document.querySelectorAll('[data-attention]').length"), 0);
-  assert.equal(await evaluate("document.querySelector('[data-field=israeli_id] select').value"), "acknowledge_blank");
+  assert.equal(await evaluate("document.querySelector('[data-field=israeli_id] [data-review-action]').dataset.reviewAction"), "acknowledge_blank");
   assert.ok(await evaluate("document.querySelector('.review-heading').textContent.includes('ממתין לבדיקה')"));
   assert.equal(await evaluate("document.querySelector('[data-human-approved-count]').dataset.humanApprovedCount"), "1");
   await evaluate("document.querySelector('.review-submit').scrollIntoView()"); await screenshot("mobile-exception-saved.png");
   console.log("Exception-only save: one decision, six fields remain unapproved, server status remains pending: PASS");
   // Explicit full-review regression, separate from exception-only operation.
+  await input("#operator-declaration", ""); // Stage multiple decisions, then explicitly save them together.
   for (const name of fields.filter(name => name !== "israeli_id")) {
-    await select("בחירת שדה לביקורת", name);
-    await evaluate(`(() => { const select = document.querySelector('[data-field="${name}"] select'); select.value = 'approve_as_extracted'; select.dispatchEvent(new Event('change', {bubbles:true})); })()`);
+    await evaluate(`document.querySelector('[data-field="${name}"] button[data-action=approve_as_extracted]').click()`);
     await input(`[data-field="${name}"] [data-review-reason]`, "נבדק מול מקור סינתטי");
   }
+  await input("#operator-declaration", "בודקת סינתטית");
   await click("שמירת החלטות הביקורת");
   await ready("document.body.textContent.includes('נשמרו 6 החלטות ביקורת') && document.body.textContent.includes('גרסה 7')");
   assert.equal(preview.stats.decisions, 7);
-  await select("בחירת שדה לביקורת", "sample_receipt_date");
-  await select("החלטה עבור תאריך קבלת דגימה", "correct_and_approve");
   await input("[data-field=sample_receipt_date] [data-value-field]", "19.08.2026");
   await input("[data-field=sample_receipt_date] [data-review-reason]", "תיקון תאריך לאחר בדיקה חוזרת");
-  await click("שמירת החלטות הביקורת");
+  await evaluate("document.querySelector('[data-field=sample_receipt_date] button[data-action=correct_and_approve]').click()");
   await ready("document.body.textContent.includes('נשמרה החלטת ביקורת אחת') && document.body.textContent.includes('גרסה 8')");
   assert.equal(preview.stats.decisions, 8, "Only the changed field is posted again");
   await select("סינון שולחן העבודה", "approved");
@@ -190,10 +187,9 @@ try {
   await click("בדיקת חריגות");
   assert.equal(await evaluate("document.querySelectorAll('dialog').length"), 0);
   await click("תאריך קבלת דגימה");
-  await select("החלטה עבור תאריך קבלת דגימה", "correct_and_approve");
   await input("[data-field=sample_receipt_date] [data-value-field]", "18.08.2026");
   await input("[data-field=sample_receipt_date] [data-review-reason]", "תיקון פורמט בתרחיש סינתטי בלבד");
-  await click("שמירת החלטות הביקורת");
+  await evaluate("document.querySelector('[data-field=sample_receipt_date] button[data-action=correct_and_approve]').click()");
   await ready("document.body.textContent.includes('גרסה 9')");
   await click("רענון מצב מהשרת");
   await ready("document.body.textContent.includes('כל החריגים טופלו לפי השרת')");

@@ -7,18 +7,23 @@ import { resolve, sep, extname } from "node:path";
 import { fields } from "../src/api.ts";
 import type { DemoRun, FinalizeCommand, ReviewCommand, SelectedForm, SavedRecord } from "../src/api.ts";
 
-export function syntheticPdf(): Buffer {
+export function syntheticPdf(pages = 1): Buffer {
   const stream = "BT /F1 19 Tf 40 740 Td (SYNTHETIC MOCK PREVIEW ONLY) Tj 0 -35 Td /F1 12 Tf (No real patient. No model extraction. UI layout fixture.) Tj ET";
-  const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+  assertPages(pages);
+  const kids = Array.from({ length: pages }, (_, index) => `${index ? index + 5 : 3} 0 R`).join(" ");
+  const page = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>";
+  const objects = ["<< /Type /Catalog /Pages 2 0 R >>", `<< /Type /Pages /Kids [${kids}] /Count ${pages} >>`,
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
+  objects.push(...Array.from({ length: pages - 1 }, () => page));
   let result = "%PDF-1.4\n";
   const offsets = [0];
   for (const [index, object] of objects.entries()) { offsets.push(Buffer.byteLength(result)); result += `${index + 1} 0 obj\n${object}\nendobj\n`; }
   const xref = Buffer.byteLength(result);
-  result += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  result += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
   return Buffer.from(result);
 }
+function assertPages(pages: number) { if (!Number.isInteger(pages) || pages < 1 || pages > 3) throw new Error("BOUNDED_SYNTHETIC_PAGES_REQUIRED"); }
 
 export async function startPreview(port = 5174) {
   const root = resolve(fileURLToPath(new URL("../dist/", import.meta.url)));
@@ -114,9 +119,9 @@ export async function startPreview(port = 5174) {
       }
       const path = resolve(root, "." + decodeURIComponent(url.pathname));
       if (url.pathname === "/") { response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(index); return; }
-      if (!path.startsWith(root + sep) || ![".js", ".css", ".svg"].includes(extname(path))) { response.writeHead(404).end(); return; }
+      if (!path.startsWith(root + sep) || ![".js", ".mjs", ".css", ".svg"].includes(extname(path))) { response.writeHead(404).end(); return; }
       const content = readFileSync(path);
-      response.writeHead(200, { "Content-Type": extname(path) === ".js" ? "text/javascript" : extname(path) === ".svg" ? "image/svg+xml" : "text/css" }).end(content);
+      response.writeHead(200, { "Content-Type": [".js", ".mjs"].includes(extname(path)) ? "text/javascript" : extname(path) === ".svg" ? "image/svg+xml" : "text/css" }).end(content);
     } catch { json({ error: { code: "MOCK_PREVIEW_ERROR" } }, 500); }
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });

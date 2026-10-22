@@ -73,13 +73,14 @@ test("all commitment rows share one confirmation and one POST followed by a GET 
   } finally { globalThis.fetch = previous; }
 });
 
-test("only blocking fields open; saved invalid date remains blocked until a valid explicit correction", async () => {
+test("all fields remain visible while blocking date prevents approval until a valid explicit correction", async () => {
   const previous = globalThis.fetch, mock = server(true); globalThis.fetch = mock.fetch;
   try {
     const app = appHarness(); await app.upload(); await app.openApproval();
     assert.ok(app.rowActions().every(b => text(b) === "בדיקת חריגות"));
-    const selector = app.nodes().find(n => n.props["aria-label"] === "בחירת שדה לביקורת")!;
-    assert.match(text(selector), /תאריך קבלת דגימה/); assert.ok(!text(selector).includes("שם פרטי"));
+    assert.equal(app.nodes().filter(n => n.type === "fieldset").length, 7);
+    assert.equal(app.nodes().filter(n => n.type === "select" && n.props["aria-label"] === "בחירת שדה לביקורת").length, 0);
+    assert.match(String(app.nodes().find(n => n.props["data-field"] === "sample_receipt_date")!.props.className), /needs-attention/);
     app.operator("בודקת סינתטית"); app.value("sample_receipt_date", 0, "18-08-2026"); app.decide("sample_receipt_date", "correct_and_approve", "");
     await app.click("שמירת החלטות הביקורת"); await app.openApproval();
     assert.match(text(app.tree), /תאריך לא תקין או פורמט לא נתמך/);

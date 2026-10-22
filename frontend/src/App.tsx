@@ -4,10 +4,11 @@ import { APIError, draftChanges, exportRows, fields, getRecords, getRun, getSave
 import type { Action, DemoRun, Draft, Drafts, FieldName, FinalizeCommand, RecordsFilters, RecordsPage, ReviewCommand, SavedRecord } from "./api.ts";
 import { attentionReason, commitmentRows, distinctCommitments, eligibilityKnown, exceptionQueue, fieldState, finalizationBlockers, humanApproved, matchesWorkFilter, mergeForms, needsAttention } from "./workbench.ts";
 import type { CommitmentRow, WorkFilter, WorkForm } from "./workbench.ts";
+import { PdfPreview } from "./PdfPreview.tsx";
 
 const actionLabels: [Action, string][] = [
-  ["approve_as_extracted", "אישור כל ערכי המקור"], ["correct_and_approve", "תיקון ואישור"],
-  ["acknowledge_blank", "אישור שדה ריק"], ["reject", "דחייה והעברה לבירור"],
+  ["approve_as_extracted", "אישור"], ["correct_and_approve", "תיקון ואישור"],
+  ["acknowledge_blank", "אישור שדה ריק"], ["reject", "העברה לבירור"],
   ["leave_unresolved", "השארה לבירור"],
 ];
 
@@ -56,6 +57,9 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   const [file, setFile] = useState<File | null>(null);
   const [uploadQueue, setUploadQueue] = useState<{ id: string; file: File; status: "queued" | "processing" | "succeeded" | "failed"; code?: string; httpStatus?: number }[]>([]);
   const uploadActive = useRef(false);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const autoSelectUpload = useRef(true);
   const [failedRuns, setFailedRuns] = useState<DemoRun[]>([]);
   const [includeFailures, setIncludeFailures] = useState(false);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -65,7 +69,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   const [drafts, setDrafts] = useState<Record<string, Drafts>>({});
   const [saved, setSaved] = useState<Record<string, Drafts>>({});
   const [operator, setOperator] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); // Foreground review/navigation only; never the extraction queue.
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState<{ form: string; command: ReviewCommand } | null>(null);
@@ -73,11 +77,12 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   const [attestation, setAttestation] = useState(false);
   const [refreshRequired, setRefreshRequired] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
-  const [blockersOnly, setBlockersOnly] = useState(false);
+  const reviewRequestActive = useRef(false);
+  const reviewSessions = useRef(new Map<string, { drafts: Record<string, Drafts>; saved: Record<string, Drafts>; operator: string; revisions: Record<string, number>; dirty: string[] }>());
   const approvalDialog = useRef<HTMLDialogElement | null>(null);
   const approvalTrigger = useRef<HTMLElement | null>(null);
   const finalRequestActive = useRef(false);
-  const [savedPreview, setSavedPreview] = useState<{ url: string; mime: string } | null>(null);
+  const [savedPreview, setSavedPreview] = useState<{ url: string; mime: string; blob: Blob } | null>(null);
   const [filters, setFilters] = useState<RecordsFilters>({ q: "", status: "", sender: "", receipt_date: "" });
   const [appliedFilters, setAppliedFilters] = useState(filters);
   const [records, setRecords] = useState<RecordsPage | null>(null);
@@ -140,7 +145,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
       setWorkForms(old => mergeForms(old, [{ run_id: value.run_id, form: value.selected_form! }]));
     }
   }
-  async function documentForms(value: DemoRun) {
+  async function documentForms(value: DemoRun, background = false) {
     remember(value);
     const ids = value.form_ids.filter(id => id !== value.selected_form?.form_id);
     let incomplete = false;
@@ -154,7 +159,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
       setWorkForms(old => mergeForms(old, entries));
       incomplete ||= loaded.some(result => result.status === "rejected");
     }
-    if (incomplete) setError("חלק מהטפסים לא נטענו לטבלה. מוצגים רק טפסים שהתקבלו מהשרת; אפשר לטעון אותם שוב בבחירת הטופס.");
+    if (incomplete) (background ? setUploadError : setError)("חלק מהטפסים לא נטענו לטבלה. מוצגים רק טפסים שהתקבלו מהשרת; אפשר לטעון אותם שוב בבחירת הטופס.");
   }
   async function loadRecordsIntoWorkspace() {
     if (!records || busy || pending || pendingFinal || recordsBusy) return;
@@ -176,16 +181,25 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   }
   async function reopen(record: Pick<SavedRecord, "run_id" | "form_id">) {
     if (busy || pending || pendingFinal) return false;
-    if (unsavedChoices() && !window.confirm("פתיחת רשומה אחרת תבטל בחירות שטרם נשמרו. להמשיך?")) return false;
+    if (unsavedChoices() && !window.confirm("יש עריכות שטרם נשמרו בשרת. הטיוטות יישמרו בזיכרון כל עוד המסך פתוח. לעבור לרשומה האחרת?")) return false;
+    autoSelectUpload.current = false;
     setBusy(true); setError(""); setNotice("");
     try {
       const next = await getRun(record.run_id, record.form_id);
       if (next.run_id !== record.run_id || next.selected_form?.form_id !== record.form_id) throw new Error("Record mismatch");
+      const currentSession = { drafts, saved, operator, revisions: Object.fromEntries(workForms.filter(entry => entry.run_id === run?.run_id).map(entry => [entry.form.form_id, entry.form.revision])), dirty: Object.keys(drafts).filter(id => unsavedFields(id).length > 0) };
+      const cached = record.run_id === run?.run_id ? currentSession : reviewSessions.current.get(record.run_id);
+      const changed = cached && cached.revisions[record.form_id] !== next.selected_form.revision;
+      if (changed && cached.dirty.includes(record.form_id)) {
+        setError("הרשומה השתנתה בשרת מאז יצירת הטיוטה. הטיוטה נשמרה בזיכרון ולא נטענה מעל גרסה אחרת. יש להשלים את הבדיקה לפני מעבר לגרסה החדשה.");
+        return false;
+      }
       const blob = await getSavedSource(record.run_id);
       const url = URL.createObjectURL(blob);
-      setFile(null); setSavedPreview({ url, mime: blob.type }); setConsent(false);
-      setRun(next); setRefreshRequired(false); setDrafts({ [record.form_id]: initialDrafts(next.selected_form) });
-      setSaved({}); setPending(null); setOperator("");
+      if (run) reviewSessions.current.set(run.run_id, currentSession);
+      setFile(null); setSavedPreview({ url, mime: blob.type, blob }); setConsent(false);
+      setRun(next); setRefreshRequired(false); setDrafts({ ...cached?.drafts, [record.form_id]: (!changed && cached?.drafts[record.form_id]) || initialDrafts(next.selected_form) });
+      setSaved({ ...cached?.saved, ...(changed ? { [record.form_id]: initialDrafts(next.selected_form) } : {}) }); setPending(null); setOperator(cached?.operator ?? "");
       setView("workspace"); setUploadExpanded(false);
       setFocusedField(next.selected_form.fields.find(needsAttention)?.field_name ?? null);
       setNotice("הרשומה והמסמך נטענו מהמאגר. לא בוצעה פנייה ל-Gemini.");
@@ -211,7 +225,13 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   async function upload() {
     if (uploadActive.current || busy || pending || pendingFinal || !file || !consent || !uploadQueue.some(item => item.status === "queued")) return;
     uploadActive.current = true;
-    setBusy(true); setError(""); setNotice(""); setRun(null); setDrafts({}); setSaved({}); setPending(null);
+    setBatchProcessing(true); setUploadError("");
+    function receive(value: DemoRun, source: File) {
+      if (autoSelectUpload.current) {
+        autoSelectUpload.current = false;
+        setFile(source); setSavedPreview(null); accept(value);
+      } else remember(value);
+    }
     try {
       for (const item of uploadQueue.filter(item => item.status === "queued")) {
         setUploadQueue(old => old.map(entry => entry.id === item.id ? { ...entry, status: "processing" } : entry));
@@ -219,30 +239,30 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
         try {
           const next = await (await request("/api/v1/demo-runs", { method: "POST", body })).json() as DemoRun;
           if (!["succeeded", "failed"].includes(next.status) || !next.run_id) throw new Error("Unexpected upload response");
-          setFile(item.file); setSavedPreview(null); setDrafts({}); setSaved({}); accept(next);
+          receive(next, item.file);
           setUploadQueue(old => old.map(entry => entry.id === item.id ? { ...entry, status: next.status as "succeeded" | "failed", code: next.failure?.code } : entry));
-          if (next.status === "succeeded") await documentForms(next);
+          if (next.status === "succeeded") await documentForms(next, true);
           else setFailedRuns(old => [...old.filter(run => run.run_id !== next.run_id), next]);
         } catch (e) {
           setUploadQueue(old => old.map(entry => entry.id === item.id ? { ...entry, status: "failed", code: e instanceof APIError ? e.code : "UNKNOWN_UPLOAD_RESULT", httpStatus: e instanceof APIError ? e.status : undefined } : entry));
           if (e instanceof APIError && e.failedRun) {
             const failed = e.failedRun;
-            setFile(item.file); setSavedPreview(null); accept(failed);
+            receive(failed, item.file);
             setFailedRuns(old => old.some(value => value.run_id === failed.run_id) ? old : [...old, failed]);
-            setError(`החילוץ נכשל בשרת (${e.code}, HTTP ${e.status}). דוח הכשל זמין לייצוא. ממשיכים לקובץ הבא ללא ניסיון חוזר.`);
+            setUploadError(`החילוץ נכשל בשרת (${e.code}, HTTP ${e.status}). דוח הכשל זמין לייצוא. ממשיכים לקובץ הבא ללא העלאה חוזרת.`);
           } else {
-            setError("העלאת קובץ נכשלה או שתוצאתה אינה ידועה. ממשיכים לקובץ הבא ללא ניסיון חוזר. יש לבדוק ברשומות השמורות לפני העלאה חוזרת של הקובץ שלא אומת.");
+            setUploadError("העלאת קובץ נכשלה או שתוצאתה אינה ידועה. ממשיכים לקובץ הבא ללא העלאה חוזרת. יש לבדוק ברשומות השמורות לפני העלאה חוזרת של הקובץ שלא אומת.");
           }
           if (e instanceof APIError && !e.failedRun && [401, 403].includes(e.status)) {
-            setError(`העיבוד נעצר עקב חסימת גישה (${e.code}, HTTP ${e.status}). יש להתחבר מחדש או לבדוק הרשאות לפני המשך.`);
+            setUploadError(`העיבוד נעצר עקב חסימת גישה (${e.code}, HTTP ${e.status}). יש להתחבר מחדש או לבדוק הרשאות לפני המשך.`);
             break;
           }
         }
       }
       if (records) void loadRecords(0, appliedFilters);
     }
-    catch (e) { setError(e instanceof APIError ? `העלאת המסמך נכשלה (${e.code}). לא בוצע ניסיון חוזר אוטומטי.` : "העלאת המסמך נכשלה. לא בוצע ניסיון חוזר אוטומטי."); }
-    finally { uploadActive.current = false; setBusy(false); }
+    catch (e) { setUploadError(e instanceof APIError ? `העלאת המסמך נכשלה (${e.code}). לא בוצעה העלאה חוזרת אוטומטית.` : "העלאת המסמך נכשלה. לא בוצעה העלאה חוזרת אוטומטית."); }
+    finally { uploadActive.current = false; setBatchProcessing(false); }
   }
   async function selectForm(form: string) {
     if (!run) return;
@@ -250,6 +270,10 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
     try {
       const next = await getRun(run.run_id, form);
       if (next.run_id !== run.run_id || next.selected_form?.form_id !== form || next.status !== "succeeded") throw new Error("Form mismatch");
+      const previous = workForms.find(entry => entry.run_id === run.run_id && entry.form.form_id === form)?.form;
+      if (previous && previous.revision !== next.selected_form.revision && unsavedFields(form).length) {
+        setError("הרשומה השתנתה בשרת. הטיוטה נשמרה ולא הוחלה על הגרסה החדשה."); return false;
+      }
       setRun(next);
       setRefreshRequired(false);
       remember(next); setFocusedField(next.selected_form.fields.find(needsAttention)?.field_name ?? null);
@@ -266,10 +290,33 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
     setAttestation(false);
     setDrafts(old => ({ ...old, [form.form_id]: { ...active, [name]: { ...active[name], ...change } } }));
   }
-  async function submit() {
-    if (!run || !form || !active) return;
+  async function selectAction(name: FieldName, action: Action) {
+    if (!run || !form || !active || busy || pending || pendingFinal || reviewRequestActive.current) return;
+    const selected = form.fields.find(field => field.field_name === name)!;
+    if (action === "approve_as_extracted" && active[name].values.join("\u0000") !== selected.provider_values.map(value => value.raw).join("\u0000") &&
+        !window.confirm("אישור המקור לא ישמור את התיקון שהקלדת בשדה זה. להמשיך?")) return;
+    const chosen = { ...active[name], action };
+    edit(name, { action });
+    if (!operator.trim() || (action !== "correct_and_approve" && !chosen.reason.trim())) {
+      setError("הפעולה נבחרה אך טרם נשמרה. יש להזין שם בודק/ת ונימוק (למעט תיקון רגיל), ואז ללחוץ שוב על הפעולה או לשמור את ההחלטות.");
+      return;
+    }
+    if (action === "correct_and_approve" && (!chosen.values.length || chosen.values.some(value => !value.trim()) ||
+        (!["central_numbers", "commitment_numbers"].includes(name) && chosen.values.length !== 1))) {
+      setError("הפעולה טרם נשמרה. יש להזין ערך לא ריק לתיקון, או לבחור במפורש אישור שדה ריק.");
+      return;
+    }
+    await submit(name, chosen);
+  }
+  async function submit(only?: FieldName, chosen?: Draft) {
+    if (!run || !form || !active || busy || pendingFinal || reviewRequestActive.current) return;
+    const submittedDrafts = only && chosen ? { ...active, [only]: chosen } : active;
+    const changes = draftChanges(submittedDrafts, saved[form.form_id]);
+    const selectedChanges = only ? Object.fromEntries(fields.map(name => [name, { ...changes[name], action: name === only ? changes[name].action : "" }])) as Drafts : changes;
     // Keep this SAME payload/IDs/time across an ambiguous network failure.
-    const command = pending ?? { form: form.form_id, command: makeCommand(run, draftChanges(active, saved[form.form_id]), operator) };
+    const command = pending ?? { form: form.form_id, command: makeCommand(run, selectedChanges, operator) };
+    if (!command.command.actions.length) return;
+    reviewRequestActive.current = true;
     setPending(command); setBusy(true); setError(""); setNotice("");
     try {
       const response = await postReview(run.run_id, command.form, command.command);
@@ -277,12 +324,13 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
       if (response.run_id !== run.run_id || !persisted || persisted.form_id !== command.form) {
         throw new Error("Unexpected review response");
       }
-      const confirmed = savedDrafts(persisted, active);
+      const confirmed = savedDrafts(persisted, submittedDrafts);
+      const updates = Object.fromEntries(command.command.actions.map(action => [action.field_name, confirmed[action.field_name]]));
       setRun(response);
       setRefreshRequired(false);
       remember(response);
-      setDrafts(old => ({ ...old, [persisted.form_id]: confirmed }));
-      setSaved(old => ({ ...old, [persisted.form_id]: confirmed }));
+      setDrafts(old => ({ ...old, [persisted.form_id]: { ...old[persisted.form_id], ...updates } }));
+      setSaved(old => ({ ...old, [persisted.form_id]: { ...(old[persisted.form_id] ?? initialDrafts(persisted)), ...updates } }));
       setPending(null);
       const count = command.command.actions.length;
       setNotice(`${count === 1 ? "נשמרה החלטת ביקורת אחת" : `נשמרו ${count} החלטות ביקורת`}. ${reviewLabels[persisted.review_status] ?? "מצב הביקורת עודכן"} · גרסה ${persisted.revision}.`);
@@ -292,7 +340,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
         ? `השמירה נכשלה (${e.code}). ההחלטות, הערכים, פרטי הבודק והנימוקים נשמרו במסך. יש לתקן ולנסות שוב.`
         : "תוצאת השמירה אינה ידועה. ההחלטות, הערכים, פרטי הבודק והנימוקים נשמרו במסך. יש לשלוח שוב את אותה בקשה כדי לאמת את המצב השמור.");
       if (e instanceof APIError && e.status < 500) setPending(null);
-    } finally { setBusy(false); }
+    } finally { reviewRequestActive.current = false; setBusy(false); }
   }
   async function download() {
     if (!run) return;
@@ -417,11 +465,10 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
   const filteredRows = rows.filter(row => matchesWorkFilter(row, workFilter));
   const page = Math.min(workPage, Math.max(0, Math.ceil(filteredRows.length / 20) - 1));
   const visibleRows = filteredRows.slice(page * 20, (page + 1) * 20);
-  const reviewFields = form?.fields.filter(field => !blockersOnly || needsAttention(field) || dirtyFields.includes(field.field_name)) ?? [];
-  const editorField = reviewFields.find(field => field.field_name === focusedField);
+  const reviewFields = fields.flatMap(name => form?.fields.find(field => field.field_name === name) ?? []);
   function rowActionLabel(row: CommitmentRow) {
     const entry = workForms.find(entry => entry.run_id === row.run_id && entry.form.form_id === row.form_id);
-    const dirty = row.run_id === run?.run_id && unsavedChoices(row.form_id);
+    const dirty = row.run_id === run?.run_id ? unsavedChoices(row.form_id) : reviewSessions.current.get(row.run_id)?.dirty.includes(row.form_id);
     if (row.finalized && !dirty) return "אושר סופית";
     return !entry || dirty || !eligibilityKnown(entry.form) || finalizationBlockers(entry.form).length ||
       (refreshRequired && row.run_id === run?.run_id && row.form_id === form?.form_id) ? "בדיקת חריגות" : "אישור סופי";
@@ -435,20 +482,19 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
       : sameRun ? await selectForm(row.form_id) : await reopen(row);
     if (!next || !next.selected_form) return;
     const selected = next.selected_form;
-    const dirty = sameRun && unsavedChoices(row.form_id);
+    const dirty = sameRun ? unsavedChoices(row.form_id) : reviewSessions.current.get(row.run_id)?.dirty.includes(row.form_id);
     setAttestation(false);
     if (!dirty && selected.finalized) { setNotice("הטופס כבר אושר סופית בשרת."); return; }
     if (!dirty && eligibilityKnown(selected) && !finalizationBlockers(selected).length) {
       setApprovalOpen(true);
     } else {
-      setBlockersOnly(true);
       setFocusedField(selected.fields.find(needsAttention)?.field_name ?? dirtyFields[0] ?? null);
       setTimeout(() => document.getElementById?.("focused-review-title")?.focus(), 0);
     }
   }
   async function openCell(row: Pick<CommitmentRow, "run_id" | "form_id">, field: FieldName) {
     if (busy || pending || pendingFinal) return;
-    const focus = () => { setBlockersOnly(false); setFocusedField(field); setTimeout(() => document.getElementById?.("focused-review-title")?.focus(), 0); };
+    const focus = () => { setFocusedField(field); setTimeout(() => document.getElementById?.(`review-field-${field}`)?.focus(), 0); };
     if (run?.run_id === row.run_id && form?.form_id === row.form_id) { focus(); return; }
     const opened = run?.run_id === row.run_id ? await selectForm(row.form_id) : await reopen(row);
     if (opened) focus();
@@ -467,6 +513,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
     }
     if (unsavedChoices() && !window.confirm("בחירת מסמך חדש תבטל בחירות שטרם נשמרו. להמשיך?")) return;
     setFile(next); setSavedPreview(null); setRun(null); setDrafts({}); setSaved({});
+    autoSelectUpload.current = true; setUploadError("");
     setUploadQueue(files.map(file => ({ id: crypto.randomUUID(), file, status: "queued" })));
     setNotice(""); setError(""); setConsent(false); setView("workspace");
   }
@@ -505,7 +552,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
 
         {error && <div role="alert" className="message message-error"><Icon name="alert" /><p dir="auto">{error}</p></div>}
         {notice && <div role="status" className="message message-success"><Icon name="check" /><p>{notice}</p></div>}
-        {busy && <div role="status" className="message message-progress"><span className="spinner" /><p>הבקשה בטיפול. זמן העיבוד תלוי בפעולה ובספק. אין צורך לשלוח שוב.</p></div>}
+        {(busy || batchProcessing) && <div role="status" className="message message-progress"><span className="spinner" /><p>{batchProcessing ? "הקבצים מעובדים ברצף. אפשר לבדוק ולאשר מסמכים שהושלמו בזמן שהאצווה ממשיכה." : "הבקשה בטיפול. אין צורך לשלוח שוב."}</p></div>}
 
         <section aria-label="רשומות שמורות" className="panel saved-records" hidden={view !== "records"}>
           <div className="panel-heading"><div><h2>מאגר הרשומות</h2><p>הערכים ברשומות ממתינות הם הצעות שטרם הושלמה בדיקתן. דגלי שדות נטענים בפתיחה או בצירוף לשולחן.</p></div><button className="button button-secondary" onClick={loadRecordsIntoWorkspace} disabled={busy || !!pending || !!pendingFinal || recordsBusy || !records?.items.length}>צירוף העמוד לשולחן העבודה</button></div>
@@ -550,8 +597,8 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
           <section aria-label="העלאת מסמך" className="panel upload-panel">
             <div className="panel-heading"><div><h2>קליטת מסמכים</h2><p>עד 30 קבצים בתור דפדפן. כל קובץ נשלח בבקשה נפרדת, אחד בכל פעם.</p></div><button className="button button-secondary" aria-expanded={uploadExpanded} aria-controls="upload-controls" onClick={() => setUploadExpanded(old => !old)}>{uploadExpanded ? "סגירת אזור ההעלאה" : "מסמך חדש"}<Icon name="plus" size={17} /></button></div>
             <div id="upload-controls" className="upload-layout" hidden={!uploadExpanded}>
-              <div className={`drop-zone ${dragging ? "is-dragging" : ""} ${file ? "has-file" : ""}`} onDragOver={e => { e.preventDefault(); if (!busy && !pending && !pendingFinal) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={e => { e.preventDefault(); setDragging(false); chooseFile(Array.from(e.dataTransfer.files)); }}>
-                <input id="source-file" className="visually-hidden file-input" aria-label="בחירת מסמך" type="file" multiple accept="application/pdf,image/png,image/jpeg" disabled={busy || !!pending || !!pendingFinal} onChange={e => { chooseFile(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+              <div className={`drop-zone ${dragging ? "is-dragging" : ""} ${file ? "has-file" : ""}`} onDragOver={e => { e.preventDefault(); if (!batchProcessing && !busy && !pending && !pendingFinal) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={e => { e.preventDefault(); setDragging(false); chooseFile(Array.from(e.dataTransfer.files)); }}>
+                <input id="source-file" className="visually-hidden file-input" aria-label="בחירת מסמך" type="file" multiple accept="application/pdf,image/png,image/jpeg" disabled={batchProcessing || busy || !!pending || !!pendingFinal} onChange={e => { chooseFile(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
                 <label htmlFor="source-file" className="drop-label"><span className="upload-symbol"><Icon name={file ? "file" : "upload"} size={25} /></span>
                   <strong>{uploadQueue.length > 1 ? `${uploadQueue.length} קבצים נבחרו` : file ? <bdi>{file.name}</bdi> : "גררו לכאן מסמכים או בחרו קבצים"}</strong>
                   <span>{file ? `${(file.size / 1024).toLocaleString("he-IL", { maximumFractionDigits: 0 })} ק״ב · לחצו להחלפת המסמך` : "מסמך PDF או תמונה מסוג PNG / JPEG"}</span>
@@ -560,12 +607,13 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
               </div>
               <div className="upload-actions"><span className="mini-heading"><Icon name="shield" size={18} />לפני שמתחילים</span>
                 <p className="upload-safety" role="note">אין להעלות מסמכי מטופלים אמיתיים או מידע רפואי אישי.</p>
-                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש את עיבוד כל המסמכים שנבחרו באמצעות כלי בינה מלאכותית.</span></label>
-                <button className="button button-primary upload-button" onClick={upload} disabled={!file || !consent || !uploadQueue.some(item => item.status === "queued") || busy || !!pending || !!pendingFinal}><Icon name="upload" size={18} />העלאה וחילוץ<Icon name="arrow" size={17} /></button>
+                <label className="consent-control"><input type="checkbox" aria-label="אישור עיבוד חיצוני לכל הקבצים" checked={consent} disabled={batchProcessing || busy || !!pending || !!pendingFinal} onChange={e => setConsent(e.target.checked)} /><span>אני מאשר/ת במפורש את עיבוד כל המסמכים שנבחרו באמצעות כלי בינה מלאכותית.</span></label>
+                <button className="button button-primary upload-button" onClick={upload} disabled={!file || !consent || !uploadQueue.some(item => item.status === "queued") || batchProcessing || busy || !!pending || !!pendingFinal}><Icon name="upload" size={18} />העלאה וחילוץ<Icon name="arrow" size={17} /></button>
                 <small>ללא ניסיון חוזר אוטומטי. ביקורת וייצוא אינם מפעילים חילוץ נוסף.</small>
               </div>
             </div>
-            {uploadQueue.length > 0 && <section className="upload-queue" aria-label="תור קבצים"><p aria-live="polite">{!busy && uploadQueue.every(item => ["succeeded", "failed"].includes(item.status)) && "עיבוד האצווה הסתיים. "}הושלמו: {uploadQueue.filter(item => item.status === "succeeded").length} · נכשלו או לא אומתו: {uploadQueue.filter(item => item.status === "failed").length} · בעיבוד: {uploadQueue.filter(item => item.status === "processing").length} · ממתינים: {uploadQueue.filter(item => item.status === "queued").length}</p>
+            {uploadError && <p role="alert" className="message message-error">{uploadError}</p>}
+            {uploadQueue.length > 0 && <section className="upload-queue" aria-label="תור קבצים"><p aria-live="polite">{!batchProcessing && uploadQueue.every(item => ["succeeded", "failed"].includes(item.status)) && "עיבוד האצווה הסתיים. "}הושלמו: {uploadQueue.filter(item => item.status === "succeeded").length} · נכשלו או לא אומתו: {uploadQueue.filter(item => item.status === "failed").length} · בעיבוד: {uploadQueue.filter(item => item.status === "processing").length} · ממתינים: {uploadQueue.filter(item => item.status === "queued").length}</p>
               <p>זהו תור בדפדפן, ללא עיבוד רקע עמיד או המשך אוטומטי לאחר סגירתו. שמירה לאחר restart מחייבת את שרת PostgreSQL הקיים.</p>
               <ul>{uploadQueue.map(item => <li key={item.id} data-upload-status={item.status}><bdi>{item.file.name}</bdi><span>{{ queued: "ממתין", processing: "בעיבוד", succeeded: "הושלם", failed: "נכשל או לא אומת" }[item.status]}</span>{item.code && <bdi dir="ltr">{item.code}</bdi>}{item.httpStatus && <bdi dir="ltr">HTTP {item.httpStatus}</bdi>}</li>)}</ul>
             </section>}
@@ -614,7 +662,7 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
 
           <div className={`workspace ${previewUrl ? "has-preview" : ""}`} id="review-workspace">
             {previewUrl && <aside className="panel source-panel" aria-label="מסמך המקור"><div className="panel-heading"><div><h2>המקור מול העיניים</h2><p>{savedPreview ? "תצוגה מהמאגר הפרטי, ללא חילוץ מחדש." : "תצוגה מקומית של המסמך שנבחר."}</p></div><Icon name="file" /></div>
-              <div className="document-preview">{previewMime === "application/pdf" ? <iframe src={previewUrl} title="תצוגת מסמך המקור" referrerPolicy="no-referrer" />
+              <div className="document-preview">{previewMime === "application/pdf" && (savedPreview?.blob ?? file) ? <PdfPreview key={previewUrl} url={previewUrl} source={(savedPreview?.blob ?? file)!} />
                 : ["image/png", "image/jpeg"].includes(previewMime ?? "") ? <img src={previewUrl} alt="מסמך המקור שנבחר לבדיקה" /> : <p>אין תצוגה מקדימה. יש לבדוק את המסמך המקומי.</p>}</div>
               {["application/pdf", "image/png", "image/jpeg"].includes(previewMime ?? "") && <a className="source-open" href={previewUrl} target="_blank" rel="noopener noreferrer">פתיחת המקור בחלון נפרד<Icon name="arrow" size={14} /></a>}
               {run && <details className="source-details"><summary>פרטי המסמך והמקור</summary><dl><dt>מזהה מסמך</dt><dd><bdi dir="ltr">{run.run_id}</bdi></dd><dt>מזהה טופס</dt><dd><bdi dir="ltr">{form?.form_id ?? "—"}</bdi></dd><dt>מקור לפי השרת</dt><dd><bdi dir="ltr">{run.data_origin}</bdi></dd></dl></details>}
@@ -636,19 +684,17 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
                 <p className="review-guidance">{typeof form.finalized === "boolean"
                   ? "פותרים ושומרים רק את החריגים. לאחר בדיקת כלל הערכים מול המקור מאשרים את הטופס בפעולה אנושית אחת. אין קבלה אוטומטית ואין אישורי שדה סמויים."
                   : "אפשר לשמור החלטה לשדה יחיד. כיום השרת דורש החלטה לכל שבעת השדות להשלמת הטופס; טיפול בחריגים בלבד אינו משלים אותו אוטומטית."}</p>
-                <label>בחירת שדה לביקורת<select aria-label="בחירת שדה לביקורת" value={editorField?.field_name ?? ""} disabled={busy} onChange={event => setFocusedField(event.target.value as FieldName || null)}>
-                  <option value="">בחרו שדה לבדיקה לפי הצורך</option>{reviewFields.map(field => <option key={field.field_name} value={field.field_name}>{fieldLabels[field.field_name]} · {fieldState(field)}</option>)}
-                </select></label>
-                <div className="field-queue">{form.fields.filter(needsAttention).map(field => <button key={field.field_name} className="button button-subtle" disabled={busy || !!pending || !!pendingFinal} onClick={() => setFocusedField(field.field_name)}>לטיפול: {fieldLabels[field.field_name]}</button>)}</div>
-                {!editorField && <p className="no-reported-flags">{form.fields.some(needsAttention) ? "בחרו שדה מסומן כדי להתחיל." : "אין דגלים מדווחים שלא טופלו בטופס זה. אין בכך אישור אנושי או הוכחה לתקינות; אפשר לפתוח כל תא לבדיקה."}</p>}
+                <p className="review-scope">כל שדות הטופס מוצגים להלן. שדות מסומנים דורשים טיפול; היעדר דגל אינו אישור אנושי. כפתור פעולה שומר רק את השדה שלו לאחר מילוי פרטי הבודק והנימוק הנדרש.</p>
                 <a className="source-open" href="#commitment-workbench">חזרה לטבלת ההתחייבויות<Icon name="arrow" size={14} /></a>
               </div>
-              {(editorField ? [editorField] : []).map(field => {
+              {reviewFields.map(field => {
                 const index = fields.indexOf(field.field_name);
                 const draft = active[field.field_name]; const multi = ["central_numbers", "commitment_numbers"].includes(field.field_name);
                 const approved = approvedStates.includes(field.review_status);
                 const attention = needsAttention(field);
-                return <fieldset id={`review-field-${field.field_name}`} tabIndex={-1} data-field={field.field_name} key={field.field_name} className={`field-card ${attention ? "needs-attention" : ""}`} disabled={busy || !!pending || !!pendingFinal}>
+                const shownValues = draft.values.length ? draft.values : [""];
+                const saving = busy && pending?.command.actions.some(action => action.field_name === field.field_name);
+                return <fieldset id={`review-field-${field.field_name}`} tabIndex={-1} data-field={field.field_name} key={field.field_name} className={`field-card ${attention ? "needs-attention" : ""} ${focusedField === field.field_name ? "is-focused" : ""}`} disabled={busy || !!pending || !!pendingFinal}>
                   <legend><span className="field-index">{String(index + 1).padStart(2, "0")}</span>{fieldLabels[field.field_name]}</legend>
                   <div className="field-status-line"><span className={`badge ${approved ? "badge-success" : attention ? "badge-warning" : "badge-neutral"}`}>{reviewLabels[field.review_status] ?? "מצב ביקורת לא מוכר"}</span><span className={attention ? "source-warning" : "source-status"}>{attention && <Icon name="alert" size={14} />}{valueLabels[field.provider_value_status] ?? "מצב מקור לא מוכר"}{attention && field.provider_value_status === "present" ? " · נדרשת בדיקת מקור" : ""}</span></div>
                   <p className="shared-field-note">ההחלטה חלה על השדה בטופס כולו ועל כל שורות ההתחייבות שלו.{multi ? " הרשימה נשמרת בשלמותה; אין יצירת שיוך בין מספרי דגימות להתחייבויות." : ""}</p>
@@ -658,21 +704,24 @@ export default function App({ sessionControls }: { sessionControls?: ReactNode }
                     <ul className="provider-values">{field.provider_values.map((value, i) => <li key={i}><bdi dir={numericFields.includes(field.field_name) ? "ltr" : "auto"}>{value.raw}</bdi>{value.normalized !== null && <small>ערך מנורמל: <bdi dir={numericFields.includes(field.field_name) ? "ltr" : "auto"}>{value.normalized}</bdi></small>}</li>)}</ul>
                     {!field.provider_values.length && <p className="missing-value">לא נמצא ערך. השדה יישאר ללא אישור עד להחלטה מפורשת.</p>}
                   </div>
-                  <label>החלטת הביקורת<select aria-label={`החלטה עבור ${fieldLabels[field.field_name]}`} value={draft.action} onChange={e => edit(field.field_name, { action: e.target.value as Action | "" })}>
-                    <option value="">ללא פעולה — המצב הקיים נשמר</option>{actionLabels.map(([value, label]) => <option key={value} value={value} disabled={value === "approve_as_extracted" && field.provider_value_status !== "present"}>{label}</option>)}
-                  </select></label>
                   <div className="review-values"><span className="input-caption">ערכים לביקורת{multi ? " · כל מספר בשורה נפרדת" : ""}</span>
-                    {draft.values.map((value, i) => <div className="value-row" key={i}><input aria-label={`${fieldLabels[field.field_name]} — ערך ${i + 1}`} data-value-field={field.field_name} data-value-index={i} dir={numericFields.includes(field.field_name) ? "ltr" : "auto"} value={value} onChange={e => edit(field.field_name, { values: draft.values.map((v, j) => j === i ? e.target.value : v) })} />
+                    {shownValues.map((value, i) => <div className="value-row" key={i}><input aria-label={`${fieldLabels[field.field_name]} — ערך ${i + 1}`} data-value-field={field.field_name} data-value-index={i} dir={numericFields.includes(field.field_name) ? "ltr" : "auto"} value={value} placeholder="חסר ערך — ניתן להזין תיקון" onChange={e => edit(field.field_name, { values: shownValues.map((v, j) => j === i ? e.target.value : v) })} />
                       {(multi || draft.values.length > 1) && <button className="button button-subtle" type="button" aria-label={`הסרת ערך ${i + 1} מתוך ${fieldLabels[field.field_name]}`} onClick={() => edit(field.field_name, { values: draft.values.filter((_, j) => j !== i) })}>הסרה</button>}
                     </div>)}
-                    {(multi || !draft.values.length) && <button className="button button-add" type="button" onClick={() => edit(field.field_name, { values: [...draft.values, ""] })}><Icon name="plus" size={15} />הוספת ערך</button>}
+                    {multi && <button className="button button-add" type="button" aria-label={`הוספת ערך עבור ${fieldLabels[field.field_name]}`} onClick={() => edit(field.field_name, { values: [...shownValues, ""] })}><Icon name="plus" size={15} />הוספת ערך</button>}
                   </div>
                   <label className="reason-label">נימוק להחלטה{draft.action === "correct_and_approve" ? " — אופציונלי לתיקון רגיל" : ""}<input data-review-reason aria-required={Boolean(draft.action && draft.action !== "correct_and_approve")} placeholder="מה נבדק מול המקור?" value={draft.reason} onChange={e => edit(field.field_name, { reason: e.target.value })} /></label>
+                  <div className="field-actions" role="group" aria-label={`פעולות עבור ${fieldLabels[field.field_name]}`} data-review-action={draft.action}>
+                    {actionLabels.map(([value, label]) => <button key={value} type="button" className={`button button-field ${draft.action === value ? "is-selected" : ""}`} data-action={value} aria-pressed={draft.action === value}
+                      disabled={busy || !!pending || !!pendingFinal || (value === "approve_as_extracted" && (field.provider_value_status !== "present" || !field.provider_values.length || field.provider_values.some(item => !item.raw.trim())))}
+                      title={value === "approve_as_extracted" ? "אישור כל ערכי המקור, ללא החלפתם בתיקון שהוקלד" : label} onClick={() => selectAction(field.field_name, value)}>{label}</button>)}
+                  </div>
+                  {saving && <p role="status" className="field-saving">שומר את החלטת השדה בשרת…</p>}
                 </fieldset>;
               })}
               <div className="panel review-submit"><h3>שמירת תיקון והחלטות שדה</h3>
                 <p>אישור ערכי המקור שומר את הרשימה המקורית כולה. תיקון ואישור שומר את הערכים שהוזנו בדיוק. דחייה או השארה לבירור אינן אישור.</p>
-                <div className="save-actions"><button className="button button-primary" onClick={submit} disabled={busy || !!pendingFinal || (!pending && !reviewReady)}><Icon name="check" size={18} />{pending ? "שליחה חוזרת של אותה בקשה" : "שמירת החלטות הביקורת"}</button><span>החלטות לשמירה: {choices.length}</span></div>
+                <div className="save-actions"><button className="button button-primary" onClick={() => submit()} disabled={busy || !!pendingFinal || (!pending && !reviewReady)}><Icon name="check" size={18} />{pending ? "שליחה חוזרת של אותה בקשה" : "שמירת החלטות הביקורת"}</button><span>החלטות לשמירה: {choices.length}</span></div>
                 <p className="save-footnote">הבחירות נשארות גלויות לאחר השמירה. רק החלטות ששונו נשלחות מחדש. הייצוא כולל את המצב השמור בלבד, גם אם נותרו שדות לא מאושרים.</p>
               </div>
             </section>}

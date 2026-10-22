@@ -61,7 +61,11 @@ export type WorkFilter = "all" | "attention" | "unapproved" | "approved";
 
 export function mergeForms(current: WorkForm[], incoming: WorkForm[]): WorkForm[] {
   const merged = new Map(current.map(entry => [JSON.stringify([entry.run_id, entry.form.form_id]), entry]));
-  for (const entry of incoming) merged.set(JSON.stringify([entry.run_id, entry.form.form_id]), entry);
+  for (const entry of incoming) {
+    const key = JSON.stringify([entry.run_id, entry.form.form_id]);
+    const previous = merged.get(key);
+    if (!previous || entry.form.revision >= previous.form.revision) merged.set(key, entry);
+  }
   return [...merged.values()];
 }
 

@@ -83,3 +83,14 @@ test("merging refreshes only the identical document/form, without cross-document
   const merged = mergeForms([{ run_id: "a", form: a }, { run_id: "b", form: b }], [{ run_id: "a", form: updated }]);
   assert.equal(merged.length, 2); assert.equal(merged[0].form.revision, 7); assert.equal(merged[1].form.revision, 0);
 });
+
+test("a late background snapshot cannot roll back a confirmed form revision", () => {
+  const confirmed = { ...form(), revision: 2, finalized: true };
+  const merged = mergeForms([{ run_id: "a", form: confirmed }], [
+    { run_id: "a", form: { ...form(), revision: 0, finalized: false } },
+    { run_id: "b", form: form() },
+  ]);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].form, confirmed);
+  assert.equal(merged[1].run_id, "b");
+});

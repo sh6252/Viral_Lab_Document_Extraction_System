@@ -143,3 +143,34 @@ test("failed list and failed source fetch show errors; reopening never discards 
     assert.equal(mock.commands.length, 0);
   } finally { globalThis.fetch = original; }
 });
+
+test("record navigation restores separate unsaved drafts even when documents share a form ID", async () => {
+  const original = globalThis.fetch, mock = recordsServer(); globalThis.fetch = mock.fetch;
+  try {
+    const app = appHarness(); await app.click("חיפוש / רענון"); await app.openRecord();
+    app.value("sender", 0, "טיוטה למסמך הראשון"); app.decide("sender", "leave_unresolved", "נימוק ראשון"); app.operator("בודקת ראשונה");
+    await app.openRecord(2);
+    assert.notEqual(app.nodes().find(node => node.props["data-value-field"] === "sender")!.props.value, "טיוטה למסמך הראשון");
+    app.value("sender", 0, "טיוטה למסמך השני"); app.operator("בודקת שנייה");
+    await app.openRecord();
+    assert.equal(app.nodes().find(node => node.props["data-value-field"] === "sender")!.props.value, "טיוטה למסמך הראשון");
+    assert.equal(app.action("sender").props.value, "leave_unresolved"); assert.equal(app.reason("sender").props.value, "נימוק ראשון");
+    assert.equal(app.nodes().find(node => node.props.id === "operator-declaration")!.props.value, "בודקת ראשונה");
+    await app.openRecord(2);
+    assert.equal(app.nodes().find(node => node.props["data-value-field"] === "sender")!.props.value, "טיוטה למסמך השני");
+    assert.equal(mock.commands.length, 0);
+  } finally { globalThis.fetch = original; }
+});
+
+test("a cached unsaved draft cannot be applied silently to a newer server revision", async () => {
+  const original = globalThis.fetch, mock = recordsServer(); globalThis.fetch = mock.fetch;
+  try {
+    const app = appHarness(); await app.click("חיפוש / רענון"); await app.openRecord();
+    app.value("sender", 0, "טיוטה ישנה"); await app.openRecord(2);
+    mock.forms.get("doc-0/one")!.revision++;
+    await app.openRecord();
+    assert.match(text(app.tree), /הרשומה השתנתה בשרת/);
+    assert.notEqual(app.nodes().find(node => node.props["data-value-field"] === "sender")!.props.value, "טיוטה ישנה");
+    assert.equal(mock.commands.length, 0);
+  } finally { globalThis.fetch = original; }
+});
